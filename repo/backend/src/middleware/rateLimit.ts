@@ -21,6 +21,7 @@ export const postAuthRateLimiter: RequestHandler = isTest
       limit: 60,
       standardHeaders: "draft-7",
       legacyHeaders: false,
+      validate: false,
       keyGenerator: (req: Request): string => {
         const userId = req.auth?.sub;
         if (userId) {

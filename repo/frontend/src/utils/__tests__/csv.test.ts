@@ -1,6 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { downloadCsv, escapeCsvCell, sanitizeFileName } from "../csv";
+
+beforeEach(() => {
+  if (typeof URL.createObjectURL !== "function") {
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+  }
+  if (typeof URL.revokeObjectURL !== "function") {
+    URL.revokeObjectURL = vi.fn();
+  }
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("downloadCsv", () => {
   it("creates a Blob with correct content type", () => {
