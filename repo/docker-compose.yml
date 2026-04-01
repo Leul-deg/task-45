@@ -1,0 +1,67 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: incident_db
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/src/db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uapp_user", "-papp_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sentinel_net
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - sentinel_net
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      CORS_ORIGIN: http://localhost
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: app_user
+      DB_PASSWORD: app_password
+      DB_NAME: incident_db
+      JWT_SECRET: local_dev_jwt_secret_change_me
+      DATA_ENCRYPTION_KEY: local_dev_data_key_change_me
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - upload_data:/app/uploads
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - sentinel_net
+    ports:
+      - "80:80"
+
+volumes:
+  mysql_data:
+  upload_data:
+
+networks:
+  sentinel_net:
+    name: sentinel_net
