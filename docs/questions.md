@@ -1,15 +1,12 @@
-# SentinelSafe EHS Platform — Design Questions & Answers
+# Business Logic Questions Log
 
-## Q1: Incident Status Transitions — Which Transitions Are Valid?
+Incident Status Transitions — Which Transitions Are Valid?
 
-### Question
-The platform enforces a strict state machine on incident statuses. Which transitions are valid, and what happens if an invalid transition is attempted?
+Question: The platform enforces a strict state machine on incident statuses. Which transitions are valid, and what happens if an invalid transition is attempted?
 
-### Understanding
-The `validTransitions` map in `src/controllers/incidents.ts` defines the allowed transitions. Every `PATCH /incidents/:id/status` call queries the current status first, then validates the proposed transition before executing the update.
+My Understanding: The `validTransitions` map in `src/controllers/incidents.ts` defines the allowed transitions. Every `PATCH /incidents/:id/status` call queries the current status first, then validates the proposed transition before executing the update.
 
-### Solution
-The valid state machine:
+Solution: The valid state machine:
 
 ```
 ┌─────────┐     ┌───────────────┐     ┌─────────────┐     ┌───────────┐     ┌────────┐
@@ -43,16 +40,13 @@ The valid state machine:
 
 ---
 
-## Q2: What Happens When SLA Targets Are Breached?
+What Happens When SLA Targets Are Breached?
 
-### Question
-The system tracks acknowledgement SLA (15 minutes by default) and closure SLA (72 hours). What happens when these targets are exceeded?
+Question: The system tracks acknowledgement SLA (15 minutes by default) and closure SLA (72 hours). What happens when these targets are exceeded?
 
-### Understanding
-SLAs are not enforced at the database level — they are informational, displayed in the `Triage.vue` dispatcher dashboard as color-coded pills. The backend does not automatically escalate or change incident status when an SLA is breached.
+My Understanding: SLAs are not enforced at the database level — they are informational, displayed in the `Triage.vue` dispatcher dashboard as color-coded pills. The backend does not automatically escalate or change incident status when an SLA is breached.
 
-### Solution
-**Frontend SLA display (Triage.vue):**
+Solution: **Frontend SLA display (Triage.vue):**
 
 The `ackAlertClass()` and `closeAlertClass()` functions compute elapsed time and assign CSS classes:
 
@@ -82,17 +76,13 @@ The SLA targets themselves (`ack_minutes`, `close_hours`) are configurable via `
 
 ---
 
-## Q3: How Are File Uploads Validated — Extension vs. Content Signature?
+How Are File Uploads Validated — Extension vs. Content Signature?
 
-### Question
-A malicious user might try to bypass file type restrictions by renaming a malicious executable (e.g., `malware.exe` → `malware.jpg`) or by setting a fake MIME type. How does the platform prevent this?
+Question: A malicious user might try to bypass file type restrictions by renaming a malicious executable (e.g., `malware.exe` → `malware.jpg`) or by setting a fake MIME type. How does the platform prevent this?
 
-### Understanding
-The upload validation in `src/services/upload.ts` applies **three independent checks** that must all pass:
+My Understanding: The upload validation in `src/services/upload.ts` applies **three independent checks** that must all pass:
 
-### Solution — Layered Validation (all must pass)
-
-**Layer 1: Extension check**
+Solution: **Layer 1: Extension check**
 ```typescript
 const extension = path.extname(file.originalname).toLowerCase();
 if (restrictedExtensions.has(extension)) throw ...  // .exe, .bat, .sh, .php, .js, .jar, .msi
@@ -130,17 +120,13 @@ Approved files are written to `uploads/incidents/<uuid>.<ext>` — a randomly ge
 
 ---
 
-## Q4: How Is PII Handled — Encryption at Rest and Masking in API Responses?
+How Is PII Handled — Encryption at Rest and Masking in API Responses?
 
-### Question
-Sensitive data like phone numbers and medical notes must be protected. How does the platform ensure this data is never exposed in plaintext either in the database or in API responses?
+Question: Sensitive data like phone numbers and medical notes must be protected. How does the platform ensure this data is never exposed in plaintext either in the database or in API responses?
 
-### Understanding
-The platform uses a two-layer PII protection strategy: **encryption at rest** and **masking in responses**. These are independent — data is encrypted when stored, and even if that encryption is bypassed, the response still masks the field.
+My Understanding: The platform uses a two-layer PII protection strategy: **encryption at rest** and **masking in responses**. These are independent — data is encrypted when stored, and even if that encryption is bypassed, the response still masks the field.
 
-### Solution
-
-**Encryption at rest (POST /incidents):**
+Solution: **Encryption at rest (POST /incidents):**
 ```typescript
 const encryptedSensitive: Record<string, string> = {};
 if (req.body?.phone) {
@@ -193,17 +179,13 @@ export function maskField(value: string, visibleLast = 4): string {
 
 ---
 
-## Q5: What Constitutes an "Anomaly" for Alerting?
+What Constitutes an "Anomaly" for Alerting?
 
-### Question
-The anomaly detection system watches for unusual patterns. What exactly triggers each type of alert, and what is the rationale?
+Question: The anomaly detection system watches for unusual patterns. What exactly triggers each type of alert, and what is the rationale?
 
-### Understanding
-Three separate detectors run every 10 minutes via `node-cron` in `src/cron/alerts.ts`. Each targets a specific threat model.
+My Understanding: Three separate detectors run every 10 minutes via `node-cron` in `src/cron/alerts.ts`. Each targets a specific threat model.
 
-### Solution
-
-**1. Mass CSV Exports — `detectMassCsvExports()`**
+Solution: **1. Mass CSV Exports — `detectMassCsvExports()`**
 
 ```sql
 SELECT user_id, COUNT(*) AS export_count FROM audit_logs
@@ -264,17 +246,13 @@ The floor of 12 edits ensures small baseline systems don't get noisy alerts on m
 
 ---
 
-## Q6: How Does Rate Limiting Work for Login vs. General API?
+How Does Rate Limiting Work for Login vs. General API?
 
-### Question
-The platform needs to protect against brute-force login attacks while not throttling normal API usage. How are these concerns separated?
+Question: The platform needs to protect against brute-force login attacks while not throttling normal API usage. How are these concerns separated?
 
-### Understanding
-The system implements two independent rate-limiting mechanisms targeting different threat models:
+My Understanding: The system implements two independent rate-limiting mechanisms targeting different threat models:
 
-### Solution
-
-**Login rate limiter (application-level, in-memory)**
+Solution: **Login rate limiter (application-level, in-memory)**
 
 Location: `src/controllers/auth.ts`
 
@@ -323,17 +301,13 @@ Currently, only the login endpoint has explicit rate limiting. The `rate limiter
 
 ---
 
-## Q7: How Does Offline/Disconnected Network Support Work?
+How Does Offline/Disconnected Network Support Work?
 
-### Question
-A reporter in a remote area with no network connectivity needs to file an incident. Does the platform support offline mode?
+Question: A reporter in a remote area with no network connectivity needs to file an incident. Does the platform support offline mode?
 
-### Understanding
-The current implementation does **not** include offline/disconnected operation support. The frontend is a SPA that requires a persistent HTTP connection to the backend API. All incident creation, status updates, and searches require round-trips to the server.
+My Understanding: The current implementation does **not** include offline/disconnected operation support. The frontend is a SPA that requires a persistent HTTP connection to the backend API. All incident creation, status updates, and searches require round-trips to the server.
 
-### Solution — Current State and Recommended Path
-
-**Current limitations:**
+Solution: **Current limitations:**
 - No service worker registration in `main.ts` or `vite.config.ts`
 - No IndexedDB or localStorage buffering of incident drafts
 - No offline queue in the Axios HTTP client
@@ -368,17 +342,13 @@ The current implementation does **not** include offline/disconnected operation s
 
 ---
 
-## Q8: How Are Audit Logs Made Immutable?
+How Are Audit Logs Made Immutable?
 
-### Question
-Audit logs are critical for compliance and forensics. How does the platform ensure they cannot be altered or deleted after the fact?
+Question: Audit logs are critical for compliance and forensics. How does the platform ensure they cannot be altered or deleted after the fact?
 
-### Understanding
-Immutability is enforced at the application layer only. A database administrator with write access could still modify audit records unless additional database-level controls are in place.
+My Understanding: Immutability is enforced at the application layer only. A database administrator with write access could still modify audit records unless additional database-level controls are in place.
 
-### Solution
-
-**Application-level immutability:**
+Solution: **Application-level immutability:**
 
 1. **No UPDATE or DELETE routes exist for audit logs.** The `audit_logs` table has no corresponding controller in `src/controllers/`. There is no `PATCH /audit-logs/:id` or `DELETE /audit-logs/:id` endpoint.
 
