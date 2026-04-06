@@ -3,11 +3,41 @@ import { Router } from "express";
 import multer from "multer";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
+import type { RowDataPacket as SettingsRowDP } from "mysql2";
+
 import { dbPool } from "../db/pool";
 import { authenticateJwt, secureStateChangingRoute, requireRole } from "../middleware/security";
 import { UploadValidationError, cleanupFiles, uploadImagesMiddleware, validateAndPersistImages } from "../services/upload";
 import { encryptAtRest, maskField } from "../utils/crypto";
 import { moderateTextInputs } from "../utils/moderator";
+
+interface SettingConfigRow extends SettingsRowDP {
+  config_key: string;
+  config_value: string;
+}
+
+async function loadConfiguredLists(): Promise<{ types: string[]; sites: string[] }> {
+  const [rows] = await dbPool.query<SettingConfigRow[]>(
+    "SELECT config_key, CAST(config_value AS CHAR) AS config_value FROM settings WHERE config_key IN ('incident_types', 'facility_sites')",
+  );
+
+  let types: string[] = [];
+  let sites: string[] = [];
+
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.config_value);
+      if (row.config_key === "incident_types" && Array.isArray(parsed)) {
+        types = parsed.map((v: unknown) => String(v).toLowerCase());
+      }
+      if (row.config_key === "facility_sites" && Array.isArray(parsed)) {
+        sites = parsed.map((v: unknown) => String(v).toLowerCase());
+      }
+    } catch { /* use defaults */ }
+  }
+
+  return { types, sites };
+}
 
 const submissionGoalMs = 2 * 60 * 1000;
 const incidentStatuses = ["New", "Acknowledged", "In Progress", "Escalated", "Closed"] as const;
@@ -63,6 +93,16 @@ const createIncidentHandler: RequestHandler = async (req: Request, res: Response
 
     if (moderationIssues.length > 0) {
       res.status(422).json({ error: "Moderation check failed", issues: moderationIssues });
+      return;
+    }
+
+    const configuredLists = await loadConfiguredLists();
+    if (configuredLists.types.length > 0 && !configuredLists.types.includes(type.toLowerCase())) {
+      res.status(400).json({ error: `Invalid incident type. Allowed: ${configuredLists.types.join(", ")}` });
+      return;
+    }
+    if (configuredLists.sites.length > 0 && !configuredLists.sites.includes(site.toLowerCase())) {
+      res.status(400).json({ error: `Invalid site. Allowed: ${configuredLists.sites.join(", ")}` });
       return;
     }
 

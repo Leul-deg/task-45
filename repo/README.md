@@ -4,15 +4,6 @@ A full-stack enterprise health and safety incident management platform with stri
 
 > **Project type:** full-stack | **Frontend:** Vue 3 + TypeScript | **Backend:** Express + TypeScript | **Database:** MySQL 8
 
-## Screenshots
-
-| Page | Role | Screenshot |
-|------|------|-----------|
-| Login | — | `screenshots/screenshot_login.png` |
-| Report Incident | Reporter | `screenshots/screenshot_reporter_report.png` |
-| Live Triage Queue | Dispatcher | `screenshots/screenshot_dispatcher_triage.png` |
-| Incident Search | Administrator | `screenshots/screenshot_admin_search.png` |
-
 ## Tech Stack
 
 - **Frontend:** Vue 3 + Vite + TypeScript + Vue Router + Chart.js
@@ -140,33 +131,28 @@ Role-based access:
 |---|---|
 | `POST /incidents` | Reporter |
 | `PATCH /incidents/:id/status` | Dispatcher |
-| `GET /search/incidents` | All authenticated roles |
+| `GET /search/incidents` | All authenticated roles (Reporter sees own only) |
+| `GET /search/resources` | All authenticated roles |
 | `GET /admin/metrics` | Safety Manager, Auditor, Administrator |
+| `GET /export/incidents` | Safety Manager, Auditor, Administrator |
+| `GET /export/metrics` | Safety Manager, Auditor, Administrator |
+| `POST /reports` | Safety Manager, Administrator |
+| `GET /reports/:id/run` | Safety Manager, Auditor, Administrator |
+| `DELETE /reports/:id` | Safety Manager, Administrator |
 | `PATCH /settings/*` | Safety Manager |
 
 ## Feature Summary
 
 - **Incident Reporting** — Form with site/type/description, auto-timestamp, up to 5 images (10MB each), PII masked in UI
 - **Dispatcher Triage** — Real-time queue with color-coded SLA alerts for acknowledgement (15 min) and closure (72 hr) targets
-- **Search** — Keyword with synonym/pinyin matching, multi-filter search, sortable results
+- **Search** — Keyword with synonym/pinyin matching, multi-filter search for incidents and safety resources, sortable results
+- **Safety Resources** — Searchable knowledge base of safety documents, procedures, and reference materials
 - **Admin Dashboard** — Chart.js visualizations for incidents, moderation actions, and user activity
-- **CSV Export** — Filtered metrics and search results exportable as UTF-8 CSV
-- **Settings Management** — Configurable incident types and custom SLA rules (Safety Manager)
+- **CSV Export** — Server-side export endpoints with audit trail for incidents and metrics; client-side fallback for search results
+- **Settings Management** — Configurable incident types, custom SLA rules, severity rules, and facility sites (Safety Manager)
 - **Audit Logging** — Immutable who/what/when logs for all state-changing requests
 - **Encrypted Backups** — Nightly (30-day retention) and monthly archives (5-year), AES-256-GCM encrypted
 - **Anomaly Alerts** — Detects mass CSV exports, repeated auth failures, and incident edit spikes
-
-## Known Deployment Constraints
-
-### Single-Instance Architecture
-
-The following security mechanisms use in-memory stores and are designed for a single-server deployment (as specified by the "disconnected corporate network" requirement):
-
-- **Anti-replay nonce store** (`middleware/security.ts`) — Uses an in-memory `Map` with 10-minute TTL-based purging. Nonces are not shared across instances and are lost on restart. The short TTL (10 minutes) limits exposure from restarts.
-- **Login rate limiter** (`controllers/auth.ts`) — In-memory tracking of login attempts per username. The database-backed `locked_until` column on the `users` table provides persistence across restarts for account lockout.
-- **General rate limiter** (`middleware/rateLimit.ts`) — In-memory request counters per user/IP with sliding window.
-
-For multi-instance deployments behind a load balancer, these stores should be migrated to a shared backing store (Redis or MySQL) to ensure consistent enforcement across all instances.
 
 ## Environment Variables
 
@@ -181,6 +167,7 @@ For multi-instance deployments behind a load balancer, these stores should be mi
 | `JWT_SECRET` | — | JWT signing secret (change in production) |
 | `DATA_ENCRYPTION_KEY` | — | AES-256 key (32-byte hex) |
 | `ENABLE_CRON` | `true` | Start backup/alert cron jobs |
+| `REQUIRE_HTTPS` | `true` | Enforce HTTPS transport (auto-enabled in production; set to `false` for local dev) |
 | `NODE_ENV` | `development` | Runtime environment |
 
 ## Default Users

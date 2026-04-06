@@ -41,6 +41,7 @@ services:
       DB_NAME: incident_db
       JWT_SECRET: local_dev_jwt_secret_change_me
       DATA_ENCRYPTION_KEY: local_dev_data_key_change_me
+      REQUIRE_HTTPS: "false"
       UPLOAD_DIR: /app/uploads
     volumes:
       - upload_data:/app/uploads

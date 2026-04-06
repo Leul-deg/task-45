@@ -11,9 +11,21 @@ jest.mock("../../src/db/pool", () => ({
   dbPool: {
     query: (_sql: string, _params?: unknown) => {
       const normalized = (_sql as string).trim().toLowerCase();
-      if (normalized.includes("ack_at_risk") && normalized.includes("from incidents")) {
+      if (normalized.includes("from settings")) {
         return Promise.resolve([[
-          { ack_at_risk: 2, close_at_risk: 1, escalated: 1, total_open: 6 },
+          { config_value: '{"ack_minutes":15,"close_hours":72}' },
+        ], []]);
+      }
+      if (normalized.includes("select status, created_at from incidents")) {
+        const longAgo = new Date(Date.now() - 30 * 60 * 1000);
+        const veryOld = new Date(Date.now() - 100 * 60 * 60 * 1000);
+        return Promise.resolve([[
+          { status: "New", created_at: longAgo },
+          { status: "New", created_at: longAgo },
+          { status: "Acknowledged", created_at: new Date() },
+          { status: "In Progress", created_at: veryOld },
+          { status: "Escalated", created_at: new Date() },
+          { status: "In Progress", created_at: new Date() },
         ], []]);
       }
       if (normalized.includes("status") && normalized.includes("from incidents")) {
@@ -54,8 +66,8 @@ describe("GET /admin/metrics", () => {
     expect(Array.isArray(res.body.user_activity_logs)).toBe(true);
     expect(res.body.incidents_by_status[0].status).toBeDefined();
     expect(res.body.sla_at_risk).toBeDefined();
-    expect(res.body.sla_at_risk.ack_at_risk).toBe(2);
     expect(res.body.sla_at_risk.total_open).toBe(6);
+    expect(res.body.sla_at_risk.escalated).toBe(1);
   });
 
   test("auditor also gets metrics", async () => {

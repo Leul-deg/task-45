@@ -4,7 +4,9 @@ import express from "express";
 
 import adminRouter from "./controllers/admin";
 import authRouter from "./controllers/auth";
+import exportsRouter from "./controllers/exports";
 import incidentsRouter from "./controllers/incidents";
+import reportsRouter from "./controllers/reports";
 import searchRouter from "./controllers/search";
 import settingsRouter from "./controllers/settings";
 import { auditLogger } from "./middleware/audit";
@@ -41,6 +43,8 @@ app.use("/admin", authenticateJwt, postAuthRateLimiter, adminRouter);
 app.use("/incidents", authenticateJwt, postAuthRateLimiter, incidentsRouter);
 app.use("/settings", authenticateJwt, postAuthRateLimiter, settingsRouter);
 app.use("/search", authenticateJwt, postAuthRateLimiter, searchRouter);
+app.use("/export", authenticateJwt, postAuthRateLimiter, exportsRouter);
+app.use("/reports", authenticateJwt, postAuthRateLimiter, reportsRouter);
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });

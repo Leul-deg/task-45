@@ -77,3 +77,14 @@ ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
 INSERT INTO settings (config_key, config_value, updated_at)
 VALUES ('facility_sites', '["Main Campus","Warehouse A","Warehouse B","Lab Building","Field Office"]', NOW())
 ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+
+-- Default Safety Resources
+INSERT IGNORE INTO safety_resources (id, title, category, description, url, tags) VALUES
+(1, 'Fire Extinguisher Operating Procedure', 'Fire Safety', 'Standard procedure for operating ABC-type fire extinguishers using the PASS technique.', '/docs/fire-extinguisher-sop.pdf', '["fire","extinguisher","PASS","emergency"]'),
+(2, 'Chemical Spill Response Guide', 'Hazardous Materials', 'Step-by-step containment and cleanup for chemical spills in laboratory environments.', '/docs/chemical-spill-guide.pdf', '["chemical","spill","hazmat","cleanup"]'),
+(3, 'PPE Selection Matrix', 'Personal Protective Equipment', 'Reference chart for selecting appropriate PPE based on hazard type and exposure level.', '/docs/ppe-matrix.pdf', '["PPE","gloves","goggles","respirator"]'),
+(4, 'Confined Space Entry Permit', 'Confined Space', 'Permit template and checklist for safe confined space entry operations.', '/docs/confined-space-permit.pdf', '["confined space","permit","ventilation"]'),
+(5, 'Lockout/Tagout (LOTO) Procedure', 'Machine Safety', 'Energy isolation procedures for maintenance and servicing of equipment.', '/docs/loto-procedure.pdf', '["LOTO","lockout","tagout","energy isolation"]'),
+(6, 'Incident Investigation Template', 'Investigation', 'Root cause analysis template for workplace incident investigations.', '/docs/investigation-template.pdf', '["investigation","root cause","RCA","5-why"]'),
+(7, 'Emergency Evacuation Plan', 'Emergency Response', 'Building evacuation routes and assembly point procedures for all facility sites.', '/docs/evacuation-plan.pdf', '["evacuation","emergency","assembly","fire drill"]'),
+(8, 'Ergonomic Workstation Assessment', 'Ergonomics', 'Self-assessment checklist for computer workstation ergonomic setup.', '/docs/ergonomic-assessment.pdf', '["ergonomics","workstation","posture","RSI"]');

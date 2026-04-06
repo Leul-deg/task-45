@@ -34,13 +34,14 @@ export const auditLogger: RequestHandler = (req, res, next) => {
 
   const startedAt = new Date();
   const route = req.originalUrl;
-  const userId = req.auth?.sub ?? null;
-  const beforeVal = res.locals.auditBefore ?? null;
 
   res.on("finish", () => {
     if (res.statusCode >= 500) {
       return;
     }
+
+    const userId = req.auth?.sub ?? null;
+    const beforeVal = res.locals.auditBefore ?? null;
 
     const afterVal =
       res.locals.auditAfter ?? {

@@ -3,6 +3,7 @@ import { reactive, ref } from "vue";
 
 import FilterField from "../components/FilterField.vue";
 import { downloadCsv } from "../utils/csv";
+import { getSession } from "../utils/auth";
 import { http } from "../utils/http";
 
 interface SearchResultItem {
@@ -82,9 +83,32 @@ function resetFilters() {
   filters.sort = "recent_activity";
 }
 
-function exportCurrentResults() {
+const privilegedExportRoles = new Set(["Safety Manager", "Auditor", "Administrator"]);
+
+async function exportCurrentResults() {
   if (results.value.length === 0) {
     return;
+  }
+
+  const session = getSession();
+  if (session && privilegedExportRoles.has(session.user.role)) {
+    try {
+      const response = await http.get("/export/incidents", {
+        params: {
+          status: filters.status || undefined,
+          date_from: filters.date_from || undefined,
+          date_to: filters.date_to || undefined,
+        },
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `incident-export-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    } catch { /* fall through to client-side export */ }
   }
 
   const rows = results.value.map((item) => [

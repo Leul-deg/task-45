@@ -303,8 +303,8 @@ export const getConsentHandler: RequestHandler = async (req: Request, res: Respo
 const authRouter = Router();
 
 authRouter.post("/login", loginHandler);
-authRouter.post("/refresh", authenticateJwt, refreshHandler);
-authRouter.post("/logout", authenticateJwt, logoutHandler);
+authRouter.post("/refresh", ...secureStateChangingRoute, refreshHandler);
+authRouter.post("/logout", ...secureStateChangingRoute, logoutHandler);
 authRouter.post("/consent", ...secureStateChangingRoute, recordConsentHandler);
 authRouter.get("/consent", authenticateJwt, getConsentHandler);
 

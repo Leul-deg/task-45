@@ -44,6 +44,7 @@ async function signOut() {
         <RouterLink v-if="canViewReporter" to="/report">Reporter</RouterLink>
         <RouterLink v-if="canViewDispatcher" to="/triage">Dispatcher</RouterLink>
         <RouterLink v-if="canViewSearch" to="/search">Search</RouterLink>
+        <RouterLink v-if="canViewSearch" to="/resources">Resources</RouterLink>
         <RouterLink v-if="canViewAdmin" to="/admin">Admin</RouterLink>
       </nav>
       <div class="identity">

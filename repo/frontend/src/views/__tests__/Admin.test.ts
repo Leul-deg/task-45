@@ -6,6 +6,8 @@ vi.mock("../../utils/http", () => ({
   http: {
     get: vi.fn(),
     patch: vi.fn(),
+    post: vi.fn(),
+    delete: vi.fn(),
     interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
   },
 }));
@@ -60,6 +62,20 @@ const settingsResponse = {
   sla_rules: [],
 };
 
+const reportsResponse = {
+  reports: [
+    {
+      id: 1,
+      name: "Status Summary",
+      description: "By status",
+      created_by: 1,
+      config: { group_by: "status" },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+  ],
+};
+
 describe("Admin.vue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,6 +85,12 @@ describe("Admin.vue", () => {
       }
       if (url === "/settings/config") {
         return Promise.resolve({ data: settingsResponse });
+      }
+      if (url === "/reports") {
+        return Promise.resolve({ data: reportsResponse });
+      }
+      if (url.startsWith("/reports/") && url.endsWith("/run")) {
+        return Promise.resolve({ data: { summary: [{ dimension: "New", count: 5 }] } });
       }
       return Promise.resolve({ data: {} });
     });
@@ -186,5 +208,58 @@ describe("Admin.vue", () => {
 
     const refreshBtn = wrapper.findAll("button").find((b) => b.text().includes("Refreshing..."));
     expect(refreshBtn).toBeTruthy();
+  });
+
+  it("loads and displays Custom Reports section and saved report list", async () => {
+    const wrapper = mount(AdminView);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Custom Reports");
+    expect(wrapper.text()).toContain("Status Summary");
+  });
+
+  it("creates report with expected payload", async () => {
+    vi.mocked(http.post).mockResolvedValue({ data: { id: 2 } });
+    const wrapper = mount(AdminView);
+    await flushPromises();
+
+    const inputs = wrapper.findAll("input");
+    const reportNameInput = inputs.find((i) => i.attributes("placeholder") === "Monthly Site Summary" || i.attributes("placeholder") === "Monthly Site Summary");
+    await reportNameInput!.setValue("Monthly Site Summary");
+
+    const saveReportBtn = wrapper.findAll("button").find((b) => b.text().includes("Save Report Definition"));
+    await saveReportBtn!.trigger("click");
+    await flushPromises();
+
+    expect(http.post).toHaveBeenCalledWith("/reports", expect.objectContaining({
+      name: "Monthly Site Summary",
+      config: expect.any(Object),
+    }));
+  });
+
+  it("runs report and renders run results", async () => {
+    const wrapper = mount(AdminView);
+    await flushPromises();
+
+    const runBtn = wrapper.findAll("button").find((b) => b.text() === "Run");
+    await runBtn!.trigger("click");
+    await flushPromises();
+
+    expect(http.get).toHaveBeenCalledWith("/reports/1/run");
+    expect(wrapper.text()).toContain("Report Results: Status Summary");
+    expect(wrapper.text()).toContain("New");
+  });
+
+  it("deletes report and refreshes list", async () => {
+    vi.mocked(http.delete).mockResolvedValue({ data: { message: "Report deleted" } });
+    const wrapper = mount(AdminView);
+    await flushPromises();
+
+    const deleteBtn = wrapper.findAll("button").find((b) => b.text() === "Delete");
+    await deleteBtn!.trigger("click");
+    await flushPromises();
+
+    expect(http.delete).toHaveBeenCalledWith("/reports/1");
+    expect(http.get).toHaveBeenCalledWith("/reports");
   });
 });

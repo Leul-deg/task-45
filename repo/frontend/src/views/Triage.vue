@@ -38,8 +38,46 @@ function ensureUpdateState(incident: IncidentRecord) {
   }
 }
 
-function elapsedMinutes(value: string): number {
-  return Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000));
+const BIZ_START = 8;
+const BIZ_END = 18;
+
+function isBusinessDay(d: Date): boolean {
+  const day = d.getDay();
+  return day >= 1 && day <= 5;
+}
+
+function businessMinutesBetween(start: Date, end: Date): number {
+  if (end <= start) return 0;
+  let total = 0;
+  const cursor = new Date(start);
+
+  while (cursor < end) {
+    if (!isBusinessDay(cursor)) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(BIZ_START, 0, 0, 0);
+      continue;
+    }
+    const dayStart = new Date(cursor);
+    if (dayStart.getHours() < BIZ_START) dayStart.setHours(BIZ_START, 0, 0, 0);
+    const dayEnd = new Date(cursor);
+    dayEnd.setHours(BIZ_END, 0, 0, 0);
+
+    if (dayStart >= dayEnd) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(BIZ_START, 0, 0, 0);
+      continue;
+    }
+    const sliceEnd = end < dayEnd ? end : dayEnd;
+    if (sliceEnd > dayStart) total += (sliceEnd.getTime() - dayStart.getTime()) / 60000;
+
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(BIZ_START, 0, 0, 0);
+  }
+  return Math.floor(total);
+}
+
+function elapsedBusinessMinutes(value: string): number {
+  return businessMinutesBetween(new Date(value), new Date());
 }
 
 function ackAlertClass(incident: IncidentRecord): string {
@@ -47,7 +85,7 @@ function ackAlertClass(incident: IncidentRecord): string {
     return "ok";
   }
 
-  const elapsed = elapsedMinutes(incident.created_at);
+  const elapsed = elapsedBusinessMinutes(incident.created_at);
   if (elapsed >= ackTargetMinutes.value) {
     return "danger";
   }
@@ -58,11 +96,11 @@ function ackAlertClass(incident: IncidentRecord): string {
 }
 
 function closeAlertClass(incident: IncidentRecord): string {
-  if (incident.status === "Closed") {
+  if (incident.status === "Closed" || incident.status === "Escalated") {
     return "ok";
   }
 
-  const elapsedHours = elapsedMinutes(incident.created_at) / 60;
+  const elapsedHours = elapsedBusinessMinutes(incident.created_at) / 60;
   if (elapsedHours >= closeTargetHours.value) {
     return "danger";
   }
@@ -206,13 +244,13 @@ onMounted(() => {
             <td>{{ incident.status }}</td>
             <td>
               <SlaPill
-                :label="`${Math.max(ackTargetMinutes - elapsedMinutes(incident.created_at), 0)}m left`"
+                :label="`${Math.max(ackTargetMinutes - elapsedBusinessMinutes(incident.created_at), 0)}m left`"
                 :severity="ackAlertClass(incident) as 'ok' | 'warn' | 'danger'"
               />
             </td>
             <td>
               <SlaPill
-                :label="`${Math.max(closeTargetHours - elapsedMinutes(incident.created_at) / 60, 0).toFixed(1)}h left`"
+                :label="incident.status === 'Escalated' ? 'Exempt' : `${Math.max(closeTargetHours - elapsedBusinessMinutes(incident.created_at) / 60, 0).toFixed(1)}h left`"
                 :severity="closeAlertClass(incident) as 'ok' | 'warn' | 'danger'"
               />
             </td>

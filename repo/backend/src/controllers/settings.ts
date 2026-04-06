@@ -33,6 +33,8 @@ const updateSlaHandler: RequestHandler = async (req, res) => {
       return;
     }
 
+    res.locals.auditBefore = await fetchSettingBefore("sla_defaults");
+
     const payload = {
       ack_minutes: ackValue,
       close_hours: closeValue,
@@ -92,6 +94,17 @@ const getSettingsConfigHandler: RequestHandler = async (_req, res) => {
   }
 };
 
+async function fetchSettingBefore(key: string): Promise<unknown> {
+  const [rows] = await dbPool.query<SettingRow[]>(
+    "SELECT CAST(config_value AS CHAR) AS config_value FROM settings WHERE config_key = ?",
+    [key],
+  );
+  if (rows[0]) {
+    try { return JSON.parse(rows[0].config_value); } catch { return rows[0].config_value; }
+  }
+  return null;
+}
+
 const updateIncidentTypesHandler: RequestHandler = async (req, res) => {
   try {
     const rawTypes = Array.isArray(req.body?.incident_types) ? req.body.incident_types : [];
@@ -104,6 +117,8 @@ const updateIncidentTypesHandler: RequestHandler = async (req, res) => {
       res.status(400).json({ error: "incident_types must contain at least one value" });
       return;
     }
+
+    res.locals.auditBefore = await fetchSettingBefore("incident_types");
 
     await dbPool.execute<ResultSetHeader>(
       "INSERT INTO settings (config_key, config_value) VALUES ('incident_types', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)",
@@ -129,6 +144,8 @@ const updateSlaRulesHandler: RequestHandler = async (req, res) => {
       res.status(400).json({ error: "rules exceeds maximum allowed entries" });
       return;
     }
+
+    res.locals.auditBefore = await fetchSettingBefore("sla_rules");
 
     await dbPool.execute<ResultSetHeader>(
       "INSERT INTO settings (config_key, config_value) VALUES ('sla_rules', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)",
@@ -210,6 +227,8 @@ const updateSeverityRulesHandler: RequestHandler = async (req, res) => {
         : {}),
     }));
 
+    res.locals.auditBefore = await fetchSettingBefore("severity_rules");
+
     await dbPool.execute<ResultSetHeader>(
       "INSERT INTO settings (config_key, config_value) VALUES ('severity_rules', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)",
       [JSON.stringify(rules)],
@@ -239,6 +258,8 @@ const updateFacilitySitesHandler: RequestHandler = async (req, res) => {
       res.status(400).json({ error: "sites must contain at least one value" });
       return;
     }
+
+    res.locals.auditBefore = await fetchSettingBefore("facility_sites");
 
     await dbPool.execute<ResultSetHeader>(
       "INSERT INTO settings (config_key, config_value) VALUES ('facility_sites', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)",

@@ -330,8 +330,173 @@ const searchIncidentsHandler: RequestHandler = async (req, res) => {
   }
 };
 
+interface ResourceRow extends RowDataPacket {
+  id: number;
+  title: string;
+  category: string;
+  description: string;
+  url: string | null;
+  tags: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+type ResourceSortKey = "relevance" | "recent" | "title" | "category";
+
+interface ResourceResult {
+  id: number;
+  title: string;
+  category: string;
+  description: string;
+  url: string | null;
+  tags: string[];
+  created_at: Date;
+  relevance_score: number;
+}
+
+const searchResourcesHandler: RequestHandler = async (req, res) => {
+  try {
+    const keyword = String(req.query.q ?? "").trim();
+    const category = String(req.query.category ?? "").trim();
+    const tagFilter = String(req.query.tags ?? "").trim();
+    const titleContains = String(req.query.title_contains ?? "").trim().toLowerCase();
+    const descriptionContains = String(req.query.description_contains ?? "").trim().toLowerCase();
+    const hasUrlRaw = String(req.query.has_url ?? "").trim().toLowerCase();
+    const dateFrom = String(req.query.date_from ?? "").trim();
+    const dateTo = String(req.query.date_to ?? "").trim();
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 100);
+    const offset = Math.max(Number(req.query.offset ?? 0), 0);
+    const requestedSort = String(req.query.sort ?? "").trim() as ResourceSortKey;
+    const sort: ResourceSortKey = requestedSort || (keyword ? "relevance" : "recent");
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (category) {
+      where.push("category = ?");
+      params.push(category);
+    }
+
+    if (dateFrom) {
+      where.push("created_at >= ?");
+      params.push(new Date(dateFrom));
+    }
+    if (dateTo) {
+      where.push("created_at <= ?");
+      params.push(new Date(dateTo));
+    }
+    if (titleContains) {
+      where.push("LOWER(title) LIKE ?");
+      params.push(`%${titleContains}%`);
+    }
+    if (descriptionContains) {
+      where.push("LOWER(description) LIKE ?");
+      params.push(`%${descriptionContains}%`);
+    }
+    if (hasUrlRaw === "true") {
+      where.push("url IS NOT NULL AND TRIM(url) != ''");
+    } else if (hasUrlRaw === "false") {
+      where.push("(url IS NULL OR TRIM(url) = '')");
+    }
+
+    const requestedTags = tagFilter
+      ? tagFilter.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+      : [];
+    for (const tag of requestedTags) {
+      where.push("JSON_SEARCH(LOWER(tags), 'one', ?) IS NOT NULL");
+      params.push(`%${tag}%`);
+    }
+
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [rows] = await dbPool.query<ResourceRow[]>(
+      `SELECT id, title, category, description, url, tags, created_at
+       FROM safety_resources
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+
+    const [countRows] = await dbPool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total FROM safety_resources ${whereClause}`,
+      params,
+    );
+
+    const total = (countRows[0] as { total: number }).total ?? 0;
+
+    let results: ResourceResult[] = rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      category: row.category,
+      description: row.description,
+      url: row.url,
+      tags: row.tags ? JSON.parse(row.tags) : [],
+      created_at: row.created_at,
+      relevance_score: 0,
+    }));
+
+    if (keyword) {
+      const normalizedKeyword = normalizeText(keyword);
+      const keywordTerms = expandKeywordTerms(keyword);
+      const keywordPinyin = toPinyinNormalized(keyword);
+
+      results = results
+        .map((row) => {
+          const haystack = normalizeText(
+            [row.title, row.description, row.category, ...row.tags].join(" "),
+          );
+          const haystackPinyin = toPinyinNormalized(haystack);
+          let score = 0;
+
+          if (haystack.includes(normalizedKeyword)) score += 5;
+          if (keywordPinyin && haystackPinyin.includes(keywordPinyin)) score += 4;
+
+          for (const term of keywordTerms) {
+            if (haystack.includes(term)) score += 2;
+            const pinyinTerm = toPinyinNormalized(term);
+            if (pinyinTerm && haystackPinyin.includes(pinyinTerm)) score += 1;
+          }
+
+          return { ...row, relevance_score: score };
+        })
+        .filter((r) => r.relevance_score > 0)
+        .sort((a, b) => b.relevance_score - a.relevance_score);
+    }
+
+    if (sort === "recent") {
+      results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } else if (sort === "category") {
+      results.sort((a, b) => a.category.localeCompare(b.category));
+    } else if (sort === "title") {
+      results.sort((a, b) => a.title.localeCompare(b.title));
+    }
+
+    res.status(200).json({
+      count: results.length,
+      total,
+      filters: {
+        q: keyword || null,
+        category: category || null,
+        tags: requestedTags,
+        title_contains: titleContains || null,
+        description_contains: descriptionContains || null,
+        has_url: hasUrlRaw === "true" ? true : hasUrlRaw === "false" ? false : null,
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+      },
+      sort,
+      results,
+    });
+  } catch (error) {
+    console.error("resource-search-failure:", error instanceof Error ? error.message : error);
+    res.status(500).json({ error: "Unable to search resources" });
+  }
+};
+
 const searchRouter = Router();
 
 searchRouter.get("/incidents", searchIncidentsHandler);
+searchRouter.get("/resources", searchResourcesHandler);
 
 export default searchRouter;

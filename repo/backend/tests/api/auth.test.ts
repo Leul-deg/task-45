@@ -134,6 +134,8 @@ describe("POST /auth/refresh", () => {
       .post("/auth/refresh")
       .set("Authorization", `Bearer ${nearExpiryToken}`)
       .set("x-csrf-token", TEST_CSRF)
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
       .send();
 
     expect(res.status).toBe(200);

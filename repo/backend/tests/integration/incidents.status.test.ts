@@ -250,7 +250,7 @@ describe("PATCH /incidents/:id/status", () => {
 
     const auditEntry = mockData.auditLogs.find((log) => log.route.includes("/incidents/1/status"));
     expect(auditEntry).toBeTruthy();
-    expect(JSON.parse(auditEntry.before_val)).toBeNull();
+    expect(JSON.parse(auditEntry.before_val)).toEqual({ status: "New" });
     expect(JSON.parse(auditEntry.after_val)).toEqual({ previous_status: "New", next_status: "Acknowledged", triage_notes: "Verified on site", collaborators: [10, 11] });
   });
 });

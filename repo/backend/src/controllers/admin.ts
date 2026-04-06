@@ -4,6 +4,7 @@ import type { RowDataPacket } from "mysql2";
 
 import { dbPool } from "../db/pool";
 import { authenticateJwt, requireRole } from "../middleware/security";
+import { businessMinutesBetween, businessHoursBetween } from "../utils/businessHours";
 
 interface StatusMetricRow extends RowDataPacket {
   status: string;
@@ -79,23 +80,51 @@ const getMetricsHandler: RequestHandler = async (req, res) => {
 
     let slaAtRisk = { ack_at_risk: 0, close_at_risk: 0, escalated: 0, total_open: 0 };
     try {
-      const [slaRows] = await dbPool.query<SlaAtRiskRow[]>(
-        `SELECT
-          SUM(CASE WHEN status = 'New' AND TIMESTAMPDIFF(MINUTE, created_at, NOW()) >= 15 THEN 1 ELSE 0 END) AS ack_at_risk,
-          SUM(CASE WHEN status != 'Closed' AND TIMESTAMPDIFF(HOUR, created_at, NOW()) >= 72 THEN 1 ELSE 0 END) AS close_at_risk,
-          SUM(CASE WHEN status = 'Escalated' THEN 1 ELSE 0 END) AS escalated,
-          COUNT(*) AS total_open
-        FROM incidents
-        WHERE status != 'Closed'`,
+      let ackTarget = 15;
+      let closeTarget = 72;
+      try {
+        const [slaSettingsRows] = await dbPool.query<RowDataPacket[]>(
+          "SELECT CAST(config_value AS CHAR) AS config_value FROM settings WHERE config_key = 'sla_defaults'",
+        );
+        if (slaSettingsRows[0]) {
+          const parsed = JSON.parse((slaSettingsRows[0] as { config_value: string }).config_value);
+          ackTarget = Number(parsed.ack_minutes) || 15;
+          closeTarget = Number(parsed.close_hours) || 72;
+        }
+      } catch { /* use defaults */ }
+
+      interface OpenIncidentRow extends RowDataPacket { status: string; created_at: Date; }
+      const [openRows] = await dbPool.query<OpenIncidentRow[]>(
+        "SELECT status, created_at FROM incidents WHERE status != 'Closed'",
       );
-      if (slaRows[0]) {
-        slaAtRisk = {
-          ack_at_risk: Number(slaRows[0].ack_at_risk) || 0,
-          close_at_risk: Number(slaRows[0].close_at_risk) || 0,
-          escalated: Number(slaRows[0].escalated) || 0,
-          total_open: Number(slaRows[0].total_open) || 0,
-        };
+
+      const now = new Date();
+      let ackRisk = 0;
+      let closeRisk = 0;
+      let escalated = 0;
+
+      for (const row of openRows) {
+        if (row.status === "Escalated") {
+          escalated++;
+        }
+
+        if (row.status === "New") {
+          const bizMinutes = businessMinutesBetween(new Date(row.created_at), now);
+          if (bizMinutes >= ackTarget) ackRisk++;
+        }
+
+        if (row.status !== "Escalated") {
+          const bizHours = businessHoursBetween(new Date(row.created_at), now);
+          if (bizHours >= closeTarget) closeRisk++;
+        }
       }
+
+      slaAtRisk = {
+        ack_at_risk: ackRisk,
+        close_at_risk: closeRisk,
+        escalated,
+        total_open: openRows.length,
+      };
     } catch {
       // SLA summary is non-critical; fail silently
     }

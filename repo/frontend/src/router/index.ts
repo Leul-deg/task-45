@@ -4,6 +4,7 @@ import LoginView from "../views/Login.vue";
 import PrivacyConsentView from "../views/PrivacyConsent.vue";
 import AdminView from "../views/Admin.vue";
 import ReportIncidentView from "../views/ReportIncident.vue";
+import ResourcesView from "../views/Resources.vue";
 import SearchView from "../views/Search.vue";
 import TriageView from "../views/Triage.vue";
 import { defaultRouteForRole, getSession, hasValidSession, isPrivacyConsentAccepted, type UserRole } from "../utils/auth";
@@ -49,6 +50,14 @@ const router = createRouter({
       path: "/search",
       name: "search",
       component: SearchView,
+      meta: {
+        requiresAuth: true,
+      },
+    },
+    {
+      path: "/resources",
+      name: "resources",
+      component: ResourcesView,
       meta: {
         requiresAuth: true,
       },

@@ -40,6 +40,37 @@ const configState = reactive({
 });
 
 const canManageSettings = computed(() => getSession()?.user.role === "Safety Manager");
+const canManageReports = computed(() => {
+  const role = getSession()?.user.role;
+  return role === "Safety Manager" || role === "Administrator";
+});
+
+interface ReportDef {
+  id: number;
+  name: string;
+  description: string | null;
+  config: Record<string, unknown>;
+  created_at: string;
+}
+
+interface ReportResult {
+  dimension: string;
+  count: number;
+}
+
+const savedReports = ref<ReportDef[]>([]);
+const reportRunResult = ref<ReportResult[] | null>(null);
+const reportRunName = ref("");
+const newReport = reactive({
+  name: "",
+  description: "",
+  group_by: "status",
+  status_filter: "",
+  site_filter: "",
+  type_filter: "",
+  date_from: "",
+  date_to: "",
+});
 
 const statusChartData = computed(() => ({
   labels: statusMetrics.value.map((item) => item.status || "Unknown"),
@@ -182,7 +213,18 @@ async function saveSettings() {
   }
 }
 
-function exportMetricsCsv() {
+async function exportMetricsCsv() {
+  try {
+    const response = await http.get("/export/metrics", { responseType: "blob" });
+    const url = URL.createObjectURL(response.data as Blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `metrics-export-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  } catch { /* fall through to client-side export */ }
+
   const rows: Array<Array<unknown>> = [];
 
   for (const row of statusMetrics.value) {
@@ -204,8 +246,74 @@ function exportMetricsCsv() {
   );
 }
 
+async function loadReports() {
+  try {
+    const response = await http.get("/reports");
+    savedReports.value = (response.data.reports || []) as ReportDef[];
+  } catch { /* non-critical */ }
+}
+
+async function createReport() {
+  if (!newReport.name.trim()) return;
+  try {
+    await http.post("/reports", {
+      name: newReport.name,
+      description: newReport.description || null,
+      config: {
+        group_by: newReport.group_by,
+        ...(newReport.status_filter ? { status_filter: newReport.status_filter } : {}),
+        ...(newReport.site_filter ? { site_filter: newReport.site_filter } : {}),
+        ...(newReport.type_filter ? { type_filter: newReport.type_filter } : {}),
+        ...(newReport.date_from ? { date_from: newReport.date_from } : {}),
+        ...(newReport.date_to ? { date_to: newReport.date_to } : {}),
+      },
+    });
+    newReport.name = "";
+    newReport.description = "";
+    await loadReports();
+  } catch (requestError: unknown) {
+    const maybeResponse = requestError as { response?: { data?: { error?: string } } };
+    error.value = maybeResponse.response?.data?.error || "Unable to create report.";
+  }
+}
+
+async function runReport(report: ReportDef) {
+  try {
+    const response = await http.get(`/reports/${report.id}/run`);
+    reportRunResult.value = (response.data.summary || []) as ReportResult[];
+    reportRunName.value = report.name;
+  } catch (requestError: unknown) {
+    const maybeResponse = requestError as { response?: { data?: { error?: string } } };
+    error.value = maybeResponse.response?.data?.error || "Unable to run report.";
+  }
+}
+
+async function runReportCsv(report: ReportDef) {
+  try {
+    const response = await http.get(`/reports/${report.id}/run`, {
+      params: { format: "csv" },
+      responseType: "blob",
+    });
+    const url = URL.createObjectURL(response.data as Blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report-${report.id}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch { /* fallback silently */ }
+}
+
+async function deleteReport(id: number) {
+  try {
+    await http.delete(`/reports/${id}`);
+    await loadReports();
+    if (reportRunResult.value) reportRunResult.value = null;
+  } catch { /* non-critical */ }
+}
+
 onMounted(() => {
   void loadMetrics();
+  void loadReports();
 });
 </script>
 
@@ -301,6 +409,100 @@ onMounted(() => {
       <p v-if="!canManageSettings" class="muted">
         You can view configuration snapshots. Only Safety Managers can modify settings.
       </p>
+    </section>
+
+    <section class="card stack">
+      <h2>Custom Reports</h2>
+      <p class="muted">Create, run, and export custom report definitions with configurable grouping and filters.</p>
+
+      <div v-if="canManageReports" class="grid two-col">
+        <label class="field">
+          <span>Report Name</span>
+          <input v-model="newReport.name" placeholder="Monthly Site Summary" />
+        </label>
+        <label class="field">
+          <span>Group By</span>
+          <select v-model="newReport.group_by">
+            <option value="status">Status</option>
+            <option value="site">Site</option>
+            <option value="type">Type</option>
+            <option value="reporter_id">Reporter</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Status Filter</span>
+          <select v-model="newReport.status_filter">
+            <option value="">All</option>
+            <option>New</option>
+            <option>Acknowledged</option>
+            <option>In Progress</option>
+            <option>Escalated</option>
+            <option>Closed</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Site Filter</span>
+          <input v-model="newReport.site_filter" placeholder="Warehouse A" />
+        </label>
+        <label class="field">
+          <span>Type Filter</span>
+          <input v-model="newReport.type_filter" placeholder="Fire" />
+        </label>
+        <label class="field">
+          <span>Description</span>
+          <input v-model="newReport.description" placeholder="Optional description" />
+        </label>
+        <label class="field">
+          <span>Date From</span>
+          <input v-model="newReport.date_from" type="date" />
+        </label>
+        <label class="field">
+          <span>Date To</span>
+          <input v-model="newReport.date_to" type="date" />
+        </label>
+      </div>
+      <button v-if="canManageReports" class="btn" :disabled="!newReport.name.trim()" @click="createReport">Save Report Definition</button>
+
+      <div v-if="savedReports.length > 0" class="table-card" style="margin-top: 1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Group By</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="report in savedReports" :key="report.id">
+              <td><strong>{{ report.name }}</strong></td>
+              <td>{{ (report.config as Record<string, unknown>).group_by }}</td>
+              <td>{{ new Date(report.created_at).toLocaleDateString() }}</td>
+              <td>
+                <button class="btn tiny" @click="runReport(report)">Run</button>
+                <button class="btn tiny ghost" @click="runReportCsv(report)">CSV</button>
+                <button v-if="canManageReports" class="btn tiny ghost" @click="deleteReport(report.id)">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="muted">No saved reports yet.</p>
+
+      <div v-if="reportRunResult" class="card stack" style="margin-top: 1rem;">
+        <h3>Report Results: {{ reportRunName }}</h3>
+        <table>
+          <thead>
+            <tr><th>Dimension</th><th>Count</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, idx) in reportRunResult" :key="idx">
+              <td>{{ row.dimension }}</td>
+              <td>{{ row.count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </section>
 </template>

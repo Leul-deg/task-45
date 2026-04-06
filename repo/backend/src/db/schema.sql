@@ -86,6 +86,31 @@ CREATE TABLE IF NOT EXISTS incident_collaborators (
   INDEX idx_collab_user (user_id)
 );
 
+CREATE TABLE IF NOT EXISTS report_definitions (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  created_by BIGINT UNSIGNED NOT NULL,
+  config JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_report_creator FOREIGN KEY (created_by) REFERENCES users(id),
+  INDEX idx_report_creator (created_by)
+);
+
+CREATE TABLE IF NOT EXISTS safety_resources (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  category VARCHAR(100) NOT NULL,
+  description TEXT NOT NULL,
+  url VARCHAR(512) NULL,
+  tags JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_resources_category (category),
+  FULLTEXT idx_resources_search (title, description)
+);
+
 CREATE TABLE IF NOT EXISTS privacy_consent (
   user_id BIGINT UNSIGNED NOT NULL,
   consented BOOLEAN NOT NULL DEFAULT FALSE,
