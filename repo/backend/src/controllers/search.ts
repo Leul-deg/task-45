@@ -336,7 +336,7 @@ interface ResourceRow extends RowDataPacket {
   category: string;
   description: string;
   url: string | null;
-  tags: string | null;
+  tags: string | string[] | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -425,16 +425,29 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
 
     const total = (countRows[0] as { total: number }).total ?? 0;
 
-    let results: ResourceResult[] = rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      category: row.category,
-      description: row.description,
-      url: row.url,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      created_at: row.created_at,
-      relevance_score: 0,
-    }));
+    let results: ResourceResult[] = rows.map((row) => {
+      let parsedTags: string[] = [];
+      if (Array.isArray(row.tags)) {
+        parsedTags = row.tags as string[];
+      } else if (typeof row.tags === "string" && row.tags.length > 0) {
+        try {
+          const maybe = JSON.parse(row.tags);
+          parsedTags = Array.isArray(maybe) ? maybe : [];
+        } catch {
+          parsedTags = [];
+        }
+      }
+      return {
+        id: row.id,
+        title: row.title,
+        category: row.category,
+        description: row.description,
+        url: row.url,
+        tags: parsedTags,
+        created_at: row.created_at,
+        relevance_score: 0,
+      };
+    });
 
     if (keyword) {
       const normalizedKeyword = normalizeText(keyword);

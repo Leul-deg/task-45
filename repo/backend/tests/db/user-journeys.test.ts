@@ -433,7 +433,4 @@ maybeDescribe("User journey: Admin", () => {
     }
   });
 
-  afterAll(async () => {
-    await (dbPool as unknown as { end: () => Promise<void> }).end();
-  });
 });

@@ -52,10 +52,6 @@ async function deleteIncidents(ids: number[]) {
 // ─── auth ─────────────────────────────────────────────────────────────────
 
 maybeDescribe("Real-DB: authentication", () => {
-  afterAll(async () => {
-    await (dbPool as any).end();
-  });
-
   test("seeded admin user can log in and receives a JWT", async () => {
     const res = await request(app)
       .post("/auth/login")

@@ -453,10 +453,6 @@ maybeDescribe("Contract: GET /search/resources response shape", () => {
     reporterToken = (await loginAs("reporter1", "reporter123")).access_token;
   });
 
-  afterAll(async () => {
-    await (dbPool as any).end();
-  });
-
   test("response contains count, total, results array", async () => {
     const res = await request(app)
       .get("/search/resources")
