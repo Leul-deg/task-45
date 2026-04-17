@@ -20,6 +20,7 @@ import { http } from "../../utils/http";
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: "/", redirect: "/login" },
     { path: "/login", component: LoginView },
     { path: "/report", component: { template: "<div />" } },
     { path: "/privacy-consent", component: { template: "<div />" } },

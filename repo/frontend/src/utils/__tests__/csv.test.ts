@@ -16,6 +16,11 @@ afterEach(() => {
 });
 
 describe("downloadCsv", () => {
+  beforeEach(() => {
+    // jsdom follows <a href="blob:..."> clicks and throws "Not implemented: navigation"
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  });
+
   it("creates a Blob with correct content type", () => {
     const createObjectURLSpy = vi.spyOn(URL, "createObjectURL");
     downloadCsv("test.csv", ["ID", "Name"], [[1, "Alice"], [2, "Bob"]]);
