@@ -1,6 +1,6 @@
 # SentinelSafe EHS — Static Delivery & Architecture Audit
 
-**Audit date:** 2026-04-18  
+**Audit date:** 2026-04-17  
 **Scope:** `/home/leul/Documents/task-45` (primary implementation under `repo/`).  
 **Method:** Static review of source, schema, tests, and documentation only. **No** project start, Docker, test execution, or runtime claims.
 

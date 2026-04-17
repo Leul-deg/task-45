@@ -1,6 +1,6 @@
 # SentinelSafe EHS — Static Delivery & Architecture Audit (Report 2)
 
-**Audit date:** 2026-04-18  
+**Audit date:** 2026-04-17  
 **Scope:** `/home/leul/Documents/task-45` (primary implementation under `repo/`).  
 **Method:** Static review of source, schema, tests, and documentation only. **No** project start, Docker, test execution, or runtime claims.
 
@@ -188,7 +188,7 @@ The implementation under `repo/` aligns with the Prompt on JWT-based access, inc
 
 ### 8.1 Test Overview
 
-Same frameworks and paths as documented in `repo/README.md:103-136` and `repo/backend/jest.config.js:1-9`.
+Frameworks and test entry points are documented in `repo/README.md:103-136` and `repo/backend/jest.config.js:1-9`.
 
 ---
 

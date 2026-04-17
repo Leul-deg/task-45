@@ -1,6 +1,6 @@
 # Audit report 01 — Fix check
 
-Each row is a **resolved** finding: what changed in the repository and where to verify it. **Unresolved** items belong only in the audit report body (§5), not in this file.
+Each row is a **resolved** finding: what changed in the repository and where to verify it. This file does not track open gaps.
 
 | # | Severity | Issue (summary) | Resolution |
 |---|----------|-------------------|------------|
