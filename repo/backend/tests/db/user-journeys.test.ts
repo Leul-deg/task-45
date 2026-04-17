@@ -315,9 +315,26 @@ maybeDescribe("User journey: Dispatcher", () => {
 
 maybeDescribe("User journey: Admin", () => {
   let session: { access_token: string; csrf_token: string };
+  const createdIds: number[] = [];
 
   beforeAll(async () => {
     session = await loginAs("admin", "admin123");
+    // Seed one incident so metrics/export endpoints have data to aggregate.
+    const reporter = await loginAs("reporter1", "reporter123");
+    const r = await request(app)
+      .post("/incidents")
+      .set(stateHeaders(reporter.access_token, reporter.csrf_token))
+      .send({
+        type: "Injury",
+        description: "Admin journey seed incident",
+        site: "Main Campus",
+        time: new Date().toISOString(),
+      });
+    if (r.status === 201) createdIds.push(r.body.id);
+  });
+
+  afterAll(async () => {
+    await deleteIncidents(createdIds);
   });
 
   test("step 1 — Admin login returns Administrator role", async () => {
