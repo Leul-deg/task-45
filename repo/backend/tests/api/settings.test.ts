@@ -6,6 +6,7 @@ import { makeTestToken } from "./helpers";
 
 const ADMIN_TOKEN = makeTestToken(1, "admin", "Administrator");
 const REPORTER_TOKEN = makeTestToken(2, "reporter1", "Reporter");
+const DISPATCHER_TOKEN = makeTestToken(3, "dispatcher1", "Dispatcher");
 const MANAGER_TOKEN = makeTestToken(4, "safety_mgr", "Safety Manager");
 
 jest.mock("../../src/db/pool", () => ({
@@ -15,6 +16,8 @@ jest.mock("../../src/db/pool", () => ({
         { config_key: "sla_defaults", config_value: '{"ack_minutes":15,"close_hours":72}' },
         { config_key: "incident_types", config_value: '["Injury","Fire","Spill"]' },
         { config_key: "sla_rules", config_value: "[]" },
+        { config_key: "severity_rules", config_value: '[{"incident_type":"Injury","severity":"high","auto_escalate":false}]' },
+        { config_key: "facility_sites", config_value: '["Main Campus","Warehouse A"]' },
       ];
       return Promise.resolve([settings, []]);
     },
@@ -38,6 +41,35 @@ describe("GET /settings/config", () => {
   test("returns 401 without auth", async () => {
     const res = await request(app).get("/settings/config").send();
     expect(res.status).toBe(401);
+  });
+
+  test("Reporter receives only incident_types and facility_sites", async () => {
+    const res = await request(app)
+      .get("/settings/config")
+      .set("Authorization", `Bearer ${REPORTER_TOKEN}`)
+      .send();
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.incident_types)).toBe(true);
+    expect(Array.isArray(res.body.facility_sites)).toBe(true);
+    expect(res.body.sla_defaults).toBeUndefined();
+    expect(res.body.severity_rules).toBeUndefined();
+    expect(res.body.sla_rules).toBeUndefined();
+  });
+
+  test("Dispatcher receives sla_defaults and empty severity_rules", async () => {
+    const res = await request(app)
+      .get("/settings/config")
+      .set("Authorization", `Bearer ${DISPATCHER_TOKEN}`)
+      .send();
+
+    expect(res.status).toBe(200);
+    expect(res.body.sla_defaults.ack_minutes).toBe(15);
+    expect(res.body.sla_defaults.close_hours).toBe(72);
+    expect(Array.isArray(res.body.severity_rules)).toBe(true);
+    expect(res.body.severity_rules).toHaveLength(0);
+    expect(Array.isArray(res.body.sla_rules)).toBe(true);
+    expect(res.body.sla_rules).toHaveLength(0);
   });
 });
 

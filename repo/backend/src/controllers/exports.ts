@@ -21,6 +21,18 @@ function toCsv(headers: string[], rows: unknown[][]): string {
   return lines.join("\n");
 }
 
+/** Minimize narrative exposure in workstation exports (full text remains in DB / detail API with RBAC). */
+function truncateExportDescription(text: string, maxLen = 80): string {
+  const normalized = String(text ?? "")
+    .replace(/\r\n/g, " ")
+    .replace(/\n/g, " ")
+    .trim();
+  if (normalized.length <= maxLen) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLen)}…`;
+}
+
 interface IncidentExportRow extends RowDataPacket {
   id: number;
   reporter_id: number;
@@ -92,13 +104,33 @@ const exportIncidentsHandler: RequestHandler = async (req, res) => {
     void logExportAudit("/export/incidents", req.auth?.sub, auditPayload);
 
     const csvRows = rows.map((r) => [
-      r.id, r.reporter_id, r.type, r.description, r.site,
-      r.time, r.status, r.rating ?? "", r.cost ?? "",
-      r.created_at, r.updated_at,
+      r.id,
+      r.reporter_id,
+      r.type,
+      truncateExportDescription(r.description),
+      r.site,
+      r.time,
+      r.status,
+      r.rating ?? "",
+      r.cost ?? "",
+      r.created_at,
+      r.updated_at,
     ]);
 
     const csv = toCsv(
-      ["ID", "Reporter ID", "Type", "Description", "Site", "Time", "Status", "Rating", "Cost", "Created At", "Updated At"],
+      [
+        "ID",
+        "Reporter ID",
+        "Type",
+        "Description (truncated)",
+        "Site",
+        "Time",
+        "Status",
+        "Rating",
+        "Cost",
+        "Created At",
+        "Updated At",
+      ],
       csvRows,
     );
 

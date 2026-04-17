@@ -36,19 +36,22 @@ export const auditLogger: RequestHandler = (req, res, next) => {
   const route = req.originalUrl;
 
   res.on("finish", () => {
-    if (res.statusCode >= 500) {
-      return;
-    }
-
     const userId = req.auth?.sub ?? null;
     const beforeVal = res.locals.auditBefore ?? null;
 
     const afterVal =
-      res.locals.auditAfter ?? {
-        action: res.locals.auditAction ?? req.method,
-        request_body: sanitizeBody(req.body, route),
-        status_code: res.statusCode,
-      };
+      res.statusCode >= 500
+        ? {
+            action: res.locals.auditAction ?? req.method,
+            status_code: res.statusCode,
+            outcome: "server_error",
+            request_body: sanitizeBody(req.body, route),
+          }
+        : (res.locals.auditAfter ?? {
+            action: res.locals.auditAction ?? req.method,
+            request_body: sanitizeBody(req.body, route),
+            status_code: res.statusCode,
+          });
 
     void dbPool
       .execute(

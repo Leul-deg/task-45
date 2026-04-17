@@ -1,5 +1,6 @@
 import { startAlertCronJobs } from "./alerts";
 import { startBackupCronJobs } from "./backup";
+import { startEscalationCronJobs } from "./escalation";
 
 let hasStarted = false;
 
@@ -11,4 +12,5 @@ export function startCronJobs(): void {
   hasStarted = true;
   startBackupCronJobs();
   startAlertCronJobs();
+  startEscalationCronJobs();
 }

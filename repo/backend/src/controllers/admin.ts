@@ -3,7 +3,7 @@ import type { RequestHandler } from "express";
 import type { RowDataPacket } from "mysql2";
 
 import { dbPool } from "../db/pool";
-import { authenticateJwt, requireRole } from "../middleware/security";
+import { requireRole } from "../middleware/security";
 import { businessMinutesBetween, businessHoursBetween } from "../utils/businessHours";
 
 interface StatusMetricRow extends RowDataPacket {

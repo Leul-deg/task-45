@@ -4,7 +4,6 @@ import { pinyin } from "pinyin-pro";
 import type { RowDataPacket } from "mysql2";
 
 import { dbPool } from "../db/pool";
-import { authenticateJwt } from "../middleware/security";
 
 const PRIVILEGED_SEARCH_ROLES = new Set(["Dispatcher", "Safety Manager", "Auditor", "Administrator"]);
 
@@ -337,11 +336,22 @@ interface ResourceRow extends RowDataPacket {
   description: string;
   url: string | null;
   tags: string | string[] | null;
+  price: number | null;
+  rating: number | null;
   created_at: Date;
   updated_at: Date;
+  popularity: number;
 }
 
-type ResourceSortKey = "relevance" | "recent" | "title" | "category";
+type ResourceSortKey =
+  | "relevance"
+  | "recent"
+  | "recent_activity"
+  | "title"
+  | "category"
+  | "popularity"
+  | "rating"
+  | "cost";
 
 interface ResourceResult {
   id: number;
@@ -350,8 +360,41 @@ interface ResourceResult {
   description: string;
   url: string | null;
   tags: string[];
+  price: number | null;
+  rating: number | null;
   created_at: Date;
+  updated_at: Date;
+  popularity: number;
   relevance_score: number;
+}
+
+function applyResourceSort(results: ResourceResult[], sort: ResourceSortKey): ResourceResult[] {
+  const sorted = [...results];
+  if (sort === "popularity") {
+    sorted.sort((a, b) => b.popularity - a.popularity);
+    return sorted;
+  }
+  if (sort === "recent" || sort === "recent_activity") {
+    sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    return sorted;
+  }
+  if (sort === "rating") {
+    sorted.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1));
+    return sorted;
+  }
+  if (sort === "cost") {
+    sorted.sort((a, b) => Number(b.price ?? -1) - Number(a.price ?? -1));
+    return sorted;
+  }
+  if (sort === "category") {
+    sorted.sort((a, b) => a.category.localeCompare(b.category));
+    return sorted;
+  }
+  if (sort === "title") {
+    sorted.sort((a, b) => a.title.localeCompare(b.title));
+    return sorted;
+  }
+  return sorted;
 }
 
 const searchResourcesHandler: RequestHandler = async (req, res) => {
@@ -364,6 +407,10 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
     const hasUrlRaw = String(req.query.has_url ?? "").trim().toLowerCase();
     const dateFrom = String(req.query.date_from ?? "").trim();
     const dateTo = String(req.query.date_to ?? "").trim();
+    const priceMin = req.query.price_min ? Number(req.query.price_min) : null;
+    const priceMax = req.query.price_max ? Number(req.query.price_max) : null;
+    const ratingMin = req.query.rating_min ? Number(req.query.rating_min) : null;
+    const ratingMax = req.query.rating_max ? Number(req.query.rating_max) : null;
     const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 100);
     const offset = Math.max(Number(req.query.offset ?? 0), 0);
     const requestedSort = String(req.query.sort ?? "").trim() as ResourceSortKey;
@@ -398,6 +445,22 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
     } else if (hasUrlRaw === "false") {
       where.push("(url IS NULL OR TRIM(url) = '')");
     }
+    if (priceMin !== null && Number.isFinite(priceMin)) {
+      where.push("price >= ?");
+      params.push(priceMin);
+    }
+    if (priceMax !== null && Number.isFinite(priceMax)) {
+      where.push("price <= ?");
+      params.push(priceMax);
+    }
+    if (ratingMin !== null && Number.isFinite(ratingMin)) {
+      where.push("rating >= ?");
+      params.push(ratingMin);
+    }
+    if (ratingMax !== null && Number.isFinite(ratingMax)) {
+      where.push("rating <= ?");
+      params.push(ratingMax);
+    }
 
     const requestedTags = tagFilter
       ? tagFilter.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
@@ -410,10 +473,21 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
     const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
 
     const [rows] = await dbPool.query<ResourceRow[]>(
-      `SELECT id, title, category, description, url, tags, created_at
+      `SELECT
+        id,
+        title,
+        category,
+        description,
+        url,
+        tags,
+        price,
+        rating,
+        created_at,
+        updated_at,
+        (CHAR_LENGTH(COALESCE(description, '')) + CHAR_LENGTH(COALESCE(title, ''))) AS popularity
        FROM safety_resources
        ${whereClause}
-       ORDER BY created_at DESC
+       ORDER BY updated_at DESC
        LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
@@ -444,7 +518,11 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
         description: row.description,
         url: row.url,
         tags: parsedTags,
+        price: row.price ?? null,
+        rating: row.rating ?? null,
         created_at: row.created_at,
+        updated_at: row.updated_at,
+        popularity: Number(row.popularity) || 0,
         relevance_score: 0,
       };
     });
@@ -477,12 +555,17 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
         .sort((a, b) => b.relevance_score - a.relevance_score);
     }
 
-    if (sort === "recent") {
-      results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    } else if (sort === "category") {
-      results.sort((a, b) => a.category.localeCompare(b.category));
-    } else if (sort === "title") {
-      results.sort((a, b) => a.title.localeCompare(b.title));
+    const sortable: ResourceSortKey[] = [
+      "popularity",
+      "recent",
+      "recent_activity",
+      "rating",
+      "cost",
+      "category",
+      "title",
+    ];
+    if (sortable.includes(sort)) {
+      results = applyResourceSort(results, sort);
     }
 
     res.status(200).json({
@@ -497,6 +580,10 @@ const searchResourcesHandler: RequestHandler = async (req, res) => {
         has_url: hasUrlRaw === "true" ? true : hasUrlRaw === "false" ? false : null,
         date_from: dateFrom || null,
         date_to: dateTo || null,
+        price_min: priceMin !== null && Number.isFinite(priceMin) ? priceMin : null,
+        price_max: priceMax !== null && Number.isFinite(priceMax) ? priceMax : null,
+        rating_min: ratingMin !== null && Number.isFinite(ratingMin) ? ratingMin : null,
+        rating_max: ratingMax !== null && Number.isFinite(ratingMax) ? ratingMax : null,
       },
       sort,
       results,

@@ -17,7 +17,7 @@ A full-stack enterprise health and safety incident management platform with stri
 ├── backend/
 │   ├── src/
 │   │   ├── controllers/    # auth, incidents, search, settings, admin
-│   │   ├── cron/            # encrypted backups, anomaly detection
+│   │   ├── cron/            # encrypted backups, anomaly detection, severity auto-escalation
 │   │   ├── db/              # MySQL pool, schema
 │   │   ├── middleware/       # security headers, audit logging
 │   │   ├── services/         # file upload validation
@@ -37,6 +37,10 @@ A full-stack enterprise health and safety incident management platform with stri
 │   └── package.json
 └── docker-compose.yml
 ```
+
+### Database upgrades
+
+Fresh Docker volumes load `backend/src/db/schema.sql` and `seed.sql`. For **existing** MySQL volumes created before `price` / `rating` existed on `safety_resources`, run the SQL in `backend/src/db/migrations/001_safety_resources_price_rating.sql` once (ignore errors if columns already exist).
 
 ## Quick Start
 
@@ -160,18 +164,21 @@ Role-based access:
 | `POST /reports` | Safety Manager, Administrator |
 | `GET /reports/:id/run` | Safety Manager, Auditor, Administrator |
 | `DELETE /reports/:id` | Safety Manager, Administrator |
-| `PATCH /settings/*` | Safety Manager |
+| `GET /settings/config` | All authenticated roles (payload is role-filtered: Reporters receive incident types and facility sites; Dispatchers also receive SLA defaults; full settings for Safety Manager, Auditor, Administrator) |
+| `PATCH /settings/sla`, `/incident-types`, `/sla-rules`, `/severity-rules` | Safety Manager |
+| `PATCH /settings/facility-sites` | Safety Manager, Administrator |
 
 ## Feature Summary
 
 - **Incident Reporting** — Form with site/type/description, auto-timestamp, up to 5 images (10MB each), PII masked in UI
 - **Dispatcher Triage** — Real-time queue with color-coded SLA alerts for acknowledgement (15 min) and closure (72 hr) targets
 - **Search** — Keyword with synonym/pinyin matching, multi-filter search for incidents and safety resources, sortable results
-- **Safety Resources** — Searchable knowledge base of safety documents, procedures, and reference materials
+- **Severity auto-escalation** — Background job (every 5 minutes) reads `severity_rules` with `auto_escalate: true` and moves matching open incidents to `Escalated` after `escalate_after_hours` (calendar hours from `created_at`); actions are logged under `ESCALATION_SYSTEM_USER_ID` (default `1`, admin seed user)
+- **Safety Resources** — Searchable knowledge base with optional `price` / `rating` filters and sorts (`popularity`, `rating`, `cost`, `recent_activity`, …)
 - **Admin Dashboard** — Chart.js visualizations for incidents, moderation actions, and user activity
-- **CSV Export** — Server-side export endpoints with audit trail for incidents and metrics; client-side fallback for search results
+- **CSV Export** — Server-side export endpoints with audit trail for incidents and metrics; incident narrative column is truncated (80 characters) in CSV to reduce over-exposure; client-side fallback for search results
 - **Settings Management** — Configurable incident types, custom SLA rules, severity rules, and facility sites (Safety Manager)
-- **Audit Logging** — Immutable who/what/when logs for all state-changing requests
+- **Audit Logging** — Who/what/when logs for state-changing requests, including minimal entries when the handler responds with HTTP 5xx
 - **Encrypted Backups** — Nightly (30-day retention) and monthly archives (5-year), AES-256-GCM encrypted
 - **Anomaly Alerts** — Detects mass CSV exports, repeated auth failures, and incident edit spikes
 
@@ -187,7 +194,8 @@ Role-based access:
 | `DB_NAME` | `incident_db` | Database name |
 | `JWT_SECRET` | — | JWT signing secret (change in production) |
 | `DATA_ENCRYPTION_KEY` | — | AES-256 key (32-byte hex) |
-| `ENABLE_CRON` | `true` | Start backup/alert cron jobs |
+| `ENABLE_CRON` | `true` | Start backup, alert, and severity auto-escalation cron jobs |
+| `ESCALATION_SYSTEM_USER_ID` | `1` | User id recorded on `incident_actions` for automatic severity escalations (must exist in `users`) |
 | `REQUIRE_HTTPS` | `true` | Enforce HTTPS transport (auto-enabled in production; set to `false` for local dev) |
 | `NODE_ENV` | `development` | Runtime environment |
 

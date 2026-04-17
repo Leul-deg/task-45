@@ -4,6 +4,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 import { dbPool } from "../db/pool";
 import { authenticateJwt, requireRole, secureStateChangingRoute } from "../middleware/security";
+import type { AppRole } from "../types/auth";
 
 const DEFAULT_ACK_MINUTES = 15;
 const DEFAULT_CLOSE_HOURS = 72;
@@ -14,6 +15,26 @@ interface SettingRow extends RowDataPacket {
 }
 
 const DEFAULT_INCIDENT_TYPES = ["Injury", "Fire", "Spill", "Equipment Failure", "Security", "Near Miss"];
+
+/** Safety Manager configuration is not exposed to Reporters; Dispatchers receive SLA targets for triage UI only. */
+function filterSettingsConfigForRole(role: AppRole, full: Record<string, unknown>): Record<string, unknown> {
+  if (role === "Safety Manager" || role === "Auditor" || role === "Administrator") {
+    return full;
+  }
+  if (role === "Dispatcher") {
+    return {
+      sla_defaults: full.sla_defaults,
+      incident_types: full.incident_types,
+      facility_sites: full.facility_sites,
+      sla_rules: [],
+      severity_rules: [],
+    };
+  }
+  return {
+    incident_types: full.incident_types,
+    facility_sites: full.facility_sites,
+  };
+}
 
 const updateSlaHandler: RequestHandler = async (req, res) => {
   try {
@@ -62,8 +83,13 @@ const updateSlaHandler: RequestHandler = async (req, res) => {
 
 const settingsRouter = Router();
 
-const getSettingsConfigHandler: RequestHandler = async (_req, res) => {
+const getSettingsConfigHandler: RequestHandler = async (req, res) => {
   try {
+    if (!req.auth) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
     const [rows] = await dbPool.query<SettingRow[]>(
       "SELECT config_key, CAST(config_value AS CHAR) AS config_value FROM settings WHERE config_key IN ('sla_defaults', 'incident_types', 'sla_rules', 'severity_rules', 'facility_sites')",
     );
@@ -87,7 +113,7 @@ const getSettingsConfigHandler: RequestHandler = async (_req, res) => {
       }
     }
 
-    res.status(200).json(payload);
+    res.status(200).json(filterSettingsConfigForRole(req.auth.role, payload));
   } catch (error) {
     console.error("settings-fetch-failure:", error instanceof Error ? error.message : error);
     res.status(500).json({ error: "Unable to fetch settings" });

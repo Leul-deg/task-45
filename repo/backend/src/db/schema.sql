@@ -105,9 +105,13 @@ CREATE TABLE IF NOT EXISTS safety_resources (
   description TEXT NOT NULL,
   url VARCHAR(512) NULL,
   tags JSON NULL,
+  price DECIMAL(12,2) NULL COMMENT 'Internal chargeback / remediation cost',
+  rating TINYINT UNSIGNED NULL COMMENT 'Internal usefulness score 1-5',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_resources_category (category),
+  INDEX idx_resources_price (price),
+  INDEX idx_resources_rating (rating),
   FULLTEXT idx_resources_search (title, description)
 );
 

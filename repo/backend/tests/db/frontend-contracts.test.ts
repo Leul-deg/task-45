@@ -142,6 +142,30 @@ maybeDescribe("Contract: GET /settings/config", () => {
   });
 });
 
+maybeDescribe("Contract: GET /settings/config role-filtered payloads", () => {
+  test("Reporter response includes only incident_types and facility_sites", async () => {
+    const token = (await loginAs("reporter1", "reporter123")).access_token;
+    const res = await request(app).get("/settings/config").set("Authorization", `Bearer ${token}`).send();
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.incident_types)).toBe(true);
+    expect(Array.isArray(res.body.facility_sites)).toBe(true);
+    expect(res.body.sla_defaults).toBeUndefined();
+    expect(res.body.severity_rules).toBeUndefined();
+  });
+
+  test("Dispatcher receives sla_defaults and empty severity_rules", async () => {
+    const token = (await loginAs("dispatcher1", "dispatcher123")).access_token;
+    const res = await request(app).get("/settings/config").set("Authorization", `Bearer ${token}`).send();
+
+    expect(res.status).toBe(200);
+    expect(typeof res.body.sla_defaults.ack_minutes).toBe("number");
+    expect(typeof res.body.sla_defaults.close_hours).toBe("number");
+    expect(Array.isArray(res.body.severity_rules)).toBe(true);
+    expect(res.body.severity_rules).toHaveLength(0);
+  });
+});
+
 // ─── GET /incidents (list) ────────────────────────────────────────────────
 // Consumed by: Triage.vue, Search.vue
 //   res.data.results  (search uses /search/incidents)
@@ -465,7 +489,7 @@ maybeDescribe("Contract: GET /search/resources response shape", () => {
     expect(Array.isArray(res.body.results)).toBe(true);
   });
 
-  test("each resource result has id, title, category, description, tags, relevance_score", async () => {
+  test("each resource result has id, title, category, description, tags, price, rating, popularity, relevance_score", async () => {
     const res = await request(app)
       .get("/search/resources")
       .set("Authorization", `Bearer ${reporterToken}`)
@@ -480,6 +504,10 @@ maybeDescribe("Contract: GET /search/resources response shape", () => {
     expect(typeof row.category).toBe("string");
     expect(typeof row.description).toBe("string");
     expect(Array.isArray(row.tags)).toBe(true);
+    expect(row).toHaveProperty("price");
+    expect(row).toHaveProperty("rating");
+    expect(row).toHaveProperty("popularity");
+    expect(row).toHaveProperty("updated_at");
     expect(typeof row.relevance_score).toBe("number");
   });
 });

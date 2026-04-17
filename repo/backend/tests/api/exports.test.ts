@@ -87,7 +87,9 @@ describe("GET /export/incidents", () => {
 
     const lines = res.text.split("\n");
     const header = lines[0];
-    expect(header).toBe("ID,Reporter ID,Type,Description,Site,Time,Status,Rating,Cost,Created At,Updated At");
+    expect(header).toBe(
+      "ID,Reporter ID,Type,Description (truncated),Site,Time,Status,Rating,Cost,Created At,Updated At",
+    );
   });
 
   test("CSV contains one data row per incident", async () => {

@@ -53,6 +53,7 @@ import { appendFile } from "fs/promises";
 import { spawn } from "child_process";
 import { runAnomalyDetectors, startAlertCronJobs } from "../../src/cron/alerts";
 import { runNightlyBackup, runMonthlyArchive, startBackupCronJobs } from "../../src/cron/backup";
+import { startEscalationCronJobs } from "../../src/cron/escalation";
 
 const { __queryFn: queryFn } = jest.requireMock("../../src/db/pool") as {
   __queryFn: jest.Mock;
@@ -294,5 +295,11 @@ describe("runMonthlyArchive — success path", () => {
 describe("startBackupCronJobs", () => {
   test("registers nightly and monthly cron schedules without throwing", () => {
     expect(() => startBackupCronJobs()).not.toThrow();
+  });
+});
+
+describe("startEscalationCronJobs", () => {
+  test("registers severity auto-escalation schedule without throwing", () => {
+    expect(() => startEscalationCronJobs()).not.toThrow();
   });
 });
