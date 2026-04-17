@@ -4,6 +4,8 @@ Base URL: `http://localhost:3000` (development)
 Content-Type: `application/json` unless noted  
 All state-changing endpoints require additional security headers (see §Security Headers).
 
+Implementation lives under `repo/backend/src/` (Express routers in `controllers/`). For the full route matrix and Docker test commands, see `repo/README.md`.
+
 ---
 
 ## Authentication Headers
@@ -31,22 +33,26 @@ x-request-nonce: <uuid>             # Must be unique per request; reuse returns 
 
 ## Security Headers Summary
 
-| Endpoint | Auth | RBAC | Security Headers |
-|---------|------|------|-----------------|
-| `POST /auth/login` | — | — | Rate limited (60/min) |
-| `POST /auth/refresh` | JWT | All roles | CSRF + timestamp + nonce |
-| `POST /auth/logout` | JWT | All roles | CSRF + timestamp + nonce |
-| `GET /incidents` | JWT | All roles | — |
-| `GET /incidents/:id` | JWT | All roles | — |
+| Endpoint | Auth | RBAC | Security headers (mutations) |
+|----------|------|------|-------------------------------|
+| `POST /auth/login` | — | — | — (dedicated login rate limit in controller) |
+| `POST /auth/refresh` | JWT | Authenticated | CSRF + timestamp + nonce |
+| `POST /auth/logout` | JWT | Authenticated | CSRF + timestamp + nonce |
+| `GET /health` | — | — | — |
+| `GET /incidents`, `GET /incidents/:id` | JWT | Authenticated | — |
 | `POST /incidents` | JWT | Reporter | CSRF + timestamp + nonce |
 | `PATCH /incidents/:id/status` | JWT | Dispatcher | CSRF + timestamp + nonce |
-| `GET /search/incidents` | JWT | All roles | — |
-| `GET /settings/config` | JWT | SM / Auditor / Admin | — |
-| `PATCH /settings/sla` | JWT | Safety Manager | CSRF + timestamp + nonce |
-| `PATCH /settings/incident-types` | JWT | Safety Manager | CSRF + timestamp + nonce |
-| `PATCH /settings/sla-rules` | JWT | Safety Manager | CSRF + timestamp + nonce |
-| `GET /admin/metrics` | JWT | SM / Auditor / Admin | — |
-| `GET /health` | — | — | — |
+| `GET /search/incidents`, `GET /search/resources` | JWT | Authenticated (incidents scoped for Reporter) | — |
+| `GET /settings/config` | JWT | Authenticated (response filtered by role — see endpoint) | — |
+| `PATCH /settings/sla`, `/incident-types`, `/sla-rules`, `/severity-rules` | JWT | Safety Manager | CSRF + timestamp + nonce |
+| `PATCH /settings/facility-sites` | JWT | Safety Manager, Administrator | CSRF + timestamp + nonce |
+| `GET /admin/metrics` | JWT | Safety Manager, Auditor, Administrator | — |
+| `GET /export/incidents`, `GET /export/metrics` | JWT | Safety Manager, Auditor, Administrator | — |
+| `POST /reports`, `DELETE /reports/:id` | JWT | Safety Manager, Administrator | CSRF + timestamp + nonce |
+| `GET /reports/:id/run` | JWT | Safety Manager, Auditor, Administrator | — |
+| **Other authenticated routes** | JWT | Per-route `requireRole` | CSRF + timestamp + nonce on `POST`/`PUT`/`PATCH`/`DELETE` |
+
+Globally, `app.ts` applies `postAuthRateLimiter` (60 requests / minute / user id in production) to authenticated routers after JWT verification.
 
 ---
 
@@ -422,7 +428,7 @@ Search incidents with keyword, filters, and multi-field sorting.
 | `cost_max` | number | — | Maximum cost (inclusive) |
 | `rating_min` | number | — | Minimum rating (inclusive) |
 | `rating_max` | number | — | Maximum rating (inclusive) |
-| `sort` | string | `popularity` | Sort key: `popularity`, `recent_activity`, `rating`, `cost` |
+| `sort` | string | *(see notes)* | Sort key: `popularity`, `recent_activity`, `rating`, `cost`. Default: `recent_activity` when `q` is set, otherwise `popularity`. |
 | `limit` | integer | 50 | Results to return (max: 100) |
 | `offset` | integer | 0 | Pagination offset |
 
@@ -489,22 +495,26 @@ Search incidents with keyword, filters, and multi-field sorting.
 
 ### `GET /settings/config`
 
-Fetch current SLA defaults, incident types, and SLA rules.
+Fetch configuration for forms and dashboards. **Any authenticated role** may call this route; the JSON body is **filtered server-side** (`filterSettingsConfigForRole` in `repo/backend/src/controllers/settings.ts`).
 
 **Auth:** JWT required  
-**Roles:** Safety Manager, Auditor, Administrator
+
+**Role-specific payloads (200):**
+
+- **Safety Manager, Auditor, Administrator** — Full object: `sla_defaults`, `incident_types`, `facility_sites`, `sla_rules`, `severity_rules`.
+- **Dispatcher** — `sla_defaults`, `incident_types`, `facility_sites`, plus empty arrays `sla_rules` and `severity_rules` (SLA targets for triage UI without exposing full rule editors).
+- **Reporter** — `incident_types` and `facility_sites` only (dropdown data for `POST /incidents`).
 
 **Query parameters:** None
 
-**Success response (200):**
+**Example (privileged role):**
 ```json
 {
-  "sla_defaults": {
-    "ack_minutes": 15,
-    "close_hours": 72
-  },
+  "sla_defaults": { "ack_minutes": 15, "close_hours": 72 },
   "incident_types": ["Injury", "Fire", "Spill", "Equipment Failure", "Security", "Near Miss"],
-  "sla_rules": []
+  "facility_sites": ["Main Campus", "Warehouse A"],
+  "sla_rules": [],
+  "severity_rules": []
 }
 ```
 
@@ -514,7 +524,7 @@ Fetch current SLA defaults, incident types, and SLA rules.
 
 Update SLA acknowledgement and closure targets.
 
-**Auth:** JWT required + Safety Manager role  
+**Auth:** JWT + Safety Manager  
 **Security headers:** CSRF + timestamp + nonce
 
 **Request body:**
@@ -547,7 +557,7 @@ Update SLA acknowledgement and closure targets.
 
 Update the list of permitted incident types.
 
-**Auth:** JWT required + Safety Manager role  
+**Auth:** JWT + Safety Manager  
 **Security headers:** CSRF + timestamp + nonce
 
 **Request body:**
@@ -574,7 +584,7 @@ Update the list of permitted incident types.
 
 Update custom SLA routing rules.
 
-**Auth:** JWT required + Safety Manager role  
+**Auth:** JWT + Safety Manager  
 **Security headers:** CSRF + timestamp + nonce
 
 **Request body:**
@@ -603,39 +613,95 @@ Update custom SLA routing rules.
 
 ---
 
+### `PATCH /settings/severity-rules`
+
+Replace severity / auto-escalation rules (used by the background escalation job).
+
+**Auth:** JWT + Safety Manager  
+**Security headers:** CSRF + timestamp + nonce  
+
+**Request body:** `{ "rules": [ { "incident_type": "Fire", "severity": "high", "auto_escalate": true, "escalate_after_hours": 2 } ] }`  
+Each rule: `incident_type` (string), `severity` (`low` \| `medium` \| `high` \| `critical`), `auto_escalate` (boolean), optional `escalate_after_hours` (1–720 when auto-escalating).
+
+**Success (200):** `{ "rules": [ ... ] }`
+
+---
+
+### `PATCH /settings/facility-sites`
+
+Update facility site strings.
+
+**Auth:** JWT + Safety Manager **or** Administrator  
+**Security headers:** CSRF + timestamp + nonce  
+
+**Request body:** `{ "sites": ["Main Campus", "Warehouse A"] }` (at least one non-empty site, max 100).
+
+**Success (200):** `{ "sites": [ ... ] }`
+
+---
+
+### `GET /search/resources`
+
+Search the `safety_resources` knowledge base (full-text style filters + optional keyword relevance).
+
+**Auth:** JWT required (any authenticated role)
+
+**Query parameters (high level):** `q`, `category`, `tags` (comma-separated), `title_contains`, `description_contains`, `has_url` (`true`/`false`), `date_from`, `date_to`, `price_min`, `price_max`, `rating_min`, `rating_max`, `sort`, `limit` (1–100), `offset`.
+
+**`sort`:** `relevance` (keyword mode default), `recent`, `recent_activity`, `popularity`, `rating`, `cost`, `category`, `title`. Without `q`, default sort is `recent`.
+
+**Success (200):** `{ "count", "total", "filters", "sort", "results" }` where each result includes `id`, `title`, `category`, `description`, `url`, `tags`, `price`, `rating`, `created_at`, `updated_at`, `popularity`, `relevance_score`.
+
+---
+
+### `GET /export/incidents`
+
+Download incidents as **CSV** (`text/csv`). Description column is **truncated to 80 characters** in the export; CSV header uses **`Description (truncated)`**.
+
+**Auth:** JWT + Safety Manager, Auditor, or Administrator  
+**Query:** optional `status`, `date_from`, `date_to` (same spirit as list filters).
+
+---
+
+### `GET /export/metrics`
+
+Download aggregated metrics as CSV (incidents by status, moderation action counts).
+
+**Auth:** JWT + Safety Manager, Auditor, or Administrator  
+
+---
+
+### `POST /reports` / `GET /reports/:id/run` / `DELETE /reports/:id`
+
+Saved report definitions and execution. See `repo/backend/src/controllers/reports.ts` for `config` validation (`group_by`, optional filters, `include_fields`).
+
+**Auth:** Create/delete — Safety Manager or Administrator (state-changing = security headers). Run — Safety Manager, Auditor, or Administrator.
+
+---
+
 ### `GET /admin/metrics`
 
-Fetch aggregated operational metrics for dashboards.
+**Auth:** JWT + Safety Manager, Auditor, or Administrator  
 
-**Auth:** JWT required  
-**Roles:** Safety Manager, Auditor, Administrator
+**Query parameters:** `date_from`, `date_to` (optional ISO dates) filter `incidents_by_status` and `moderation_actions` aggregations. `user_activity_logs` always reflects the last **7 days** regardless of those filters.
 
-**Query parameters:**
-| Param | Type | Notes |
-|-------|------|-------|
-| `date_from` | string | ISO date; filter incidents and actions to this start |
-| `date_to` | string | ISO date; filter incidents and actions to this end |
+**Success response (200)** includes SLA summary used by the admin dashboard:
 
-**Note:** `user_activity_logs` always covers the last **7 days** regardless of date filters.
-
-**Success response (200):**
 ```json
 {
-  "incidents_by_status": [
-    { "status": "New", "count": 5 },
-    { "status": "Acknowledged", "count": 3 },
-    { "status": "Closed", "count": 2 }
-  ],
-  "moderation_actions": [
-    { "action": "STATUS_UPDATED", "count": 10 },
-    { "action": "INCIDENT_CREATED", "count": 8 }
-  ],
-  "user_activity_logs": [
-    { "user_id": 1, "count": 20 },
-    { "user_id": 3, "count": 15 }
-  ]
+  "incidents_by_status": [{ "status": "New", "count": 5 }],
+  "moderation_actions": [{ "action": "STATUS_UPDATED", "count": 10 }],
+  "user_activity_logs": [{ "user_id": 1, "count": 20 }],
+  "sla_at_risk": {
+    "ack_at_risk": 2,
+    "close_at_risk": 1,
+    "escalated": 0,
+    "total_open": 12
+  }
 }
 ```
+
+`sla_at_risk` counts open incidents using **business-time** helpers (`repo/backend/src/utils/businessHours.ts`) against configured `sla_defaults`.
 
 ---
 
@@ -656,7 +722,7 @@ Lightweight health check for load balancers and orchestrators.
 
 ## Appendix: Content Moderation
 
-Every text field submitted to `POST /incidents` and `PATCH /incidents/:id/status` is scanned by `moderateTextInputs()` in `src/utils/moderator.ts`.
+Every text field submitted to `POST /incidents` and `PATCH /incidents/:id/status` is scanned by `moderateTextInputs()` in `repo/backend/src/utils/moderator.ts`.
 
 **Blocked terms (case-insensitive):**
 ```
@@ -675,7 +741,7 @@ Detection returns `{field, type: "blocked_term" | "pii", detail}` objects. The r
 
 ## Appendix: File Upload Validation
 
-Images uploaded via `POST /incidents` are validated in layers:
+Images uploaded via `POST /incidents` are validated in `repo/backend/src/services/upload.ts` in layers:
 
 1. **Extension allowlist:** `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`
 2. **Extension blocklist:** `.exe`, `.bat`, `.cmd`, `.sh`, `.php`, `.js`, `.jar`, `.msi`

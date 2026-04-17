@@ -13,7 +13,7 @@ SentinelSafe is a full-stack enterprise health and safety (EHS) incident managem
 | **Database** | MySQL 8.0 |
 | **Containerization** | Docker Compose (frontend, backend, MySQL) |
 | **Web Server** | Nginx (serves Vue SPA build) |
-| **Scheduling** | node-cron (backups, anomaly detection) |
+| **Scheduling** | node-cron (encrypted backups, anomaly detection, severity auto-escalation) |
 
 ### Deployment Topology
 
@@ -28,9 +28,10 @@ Nginx (frontend)
 Express Backend (:3000)
   │
   ├─ JWT Auth / RBAC middleware
+  ├─ Rate limiting (pre-auth + per-user post-auth)
   ├─ Audit logger middleware
   ├─ Content moderation
-  └─ Controllers (incidents, auth, settings, search, admin)
+  └─ Controllers (auth, incidents, search, settings, admin, exports, reports)
         │
         ▼
   MySQL 8.0 (:3306)
@@ -44,11 +45,11 @@ repo/
 │   ├── src/
 │   │   ├── app.ts           # Express app instance
 │   │   ├── index.ts         # Server entry point
-│   │   ├── controllers/     # Route handlers
-│   │   ├── middleware/      # Security + audit
+│   │   ├── controllers/     # auth, incidents, search, settings, admin, exports, reports
+│   │   ├── middleware/      # Security, audit, rate limits
 │   │   ├── services/        # Upload validation
-│   │   ├── utils/           # Crypto, moderator, token blocklist
-│   │   ├── cron/            # Backup + anomaly detection
+│   │   ├── utils/           # Crypto, moderator, token blocklist, business hours
+│   │   ├── cron/            # Backup, anomaly detection, severity escalation
 │   │   └── db/              # Pool + schema + seed
 │   └── tests/               # Jest (unit, integration, API)
 ├── frontend/         # Vue 3 SPA
@@ -57,9 +58,10 @@ repo/
 │   │   ├── router/          # Vue Router + guards
 │   │   └── utils/           # Auth, http, csv utilities
 │   └── nginx.conf           # SPA routing config
-├── docs/             # This directory
+├── docs/             # API spec, design, Q&A (this directory)
 ├── docker-compose.yml
-└── run_tests.sh      # Full test suite runner
+├── docker-compose.test.yml
+└── run_tests.sh      # Full test suite runner (Docker)
 ```
 
 ---
@@ -91,12 +93,11 @@ repo/
 │  Incoming Request                                                │
 │       │                                                          │
 │       ▼                                                          │
-│  ┌────────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐   │
-│  │ Helmet     │→ │ CORS     │→ │ JSON       │→ │ Audit    │   │
-│  │ security   │  │ (origin  │  │ body       │  │ Logger   │   │
-│  │ headers    │  │  check)  │  │ parser     │  │ (fires   │   │
-│  │            │  │          │  │ (16KB max) │  │  async)  │   │
-│  └────────────┘  └──────────┘  └────────────┘  └──────────┘   │
+│  ┌────────────┐  ┌──────────┐  ┌────────────┐  ┌────────────┐  ┌──────────┐   │
+│  │ Helmet     │→ │ CORS     │→ │ JSON       │→ │ Pre-auth   │→ │ Audit    │   │
+│  │ + HTTPS    │  │ (origin  │  │ body       │  │ rate limit │  │ logger   │   │
+│  │ (optional) │  │  check)  │  │ (16KB max) │  │ (login IP) │  │ (async)  │   │
+│  └────────────┘  └──────────┘  └────────────┘  └────────────┘  └──────────┘   │
 │       │                 │            │               │          │
 │       │                 │            │               ▼          │
 │       │                 │            │     ┌──────────────┐    │
@@ -220,9 +221,11 @@ Immutable append-only log of every state-changing request.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `config_key` | VARCHAR(100) PK | sla_defaults, incident_types, sla_rules |
+| `config_key` | VARCHAR(100) PK | `sla_defaults`, `incident_types`, `sla_rules`, `severity_rules`, `facility_sites` |
 | `config_value` | JSON | Configured value |
 | `updated_at` | TIMESTAMP | Auto-update |
+
+`severity_rules` drives the optional **auto-escalation** cron (`repo/backend/src/cron/escalation.ts`): rules with `auto_escalate: true` and `escalate_after_hours` move matching open incidents to `Escalated` using **elapsed calendar hours** from `incidents.created_at`.
 
 ### 3.6 `images`
 
@@ -246,6 +249,18 @@ Immutable append-only log of every state-changing request.
 
 **Index:** `idx_revoked_expires`
 
+### 3.8 `safety_resources`
+
+Knowledge-base rows for `GET /search/resources`: `title`, `category`, `description`, optional `url`, `tags` (JSON array), optional internal `price` / `rating`, timestamps, plus derived search popularity.
+
+### 3.9 `incident_collaborators`
+
+Composite PK `(incident_id, user_id)` with `assigned_by`, `assigned_at` — populated from `PATCH /incidents/:id/status` when `collaborators` are supplied.
+
+### 3.10 `report_definitions`
+
+Saved analytics report configs (`name`, `description`, `created_by`, JSON `config`) for the `/reports` API.
+
 ---
 
 ## 4. Security Design
@@ -256,7 +271,7 @@ Immutable append-only log of every state-changing request.
 - **TTL:** 15 minutes (`expiresIn: "15m"`)
 - **Claims:** `sub` (user id), `username`, `role`, `csrfToken`, `jti` (unique token id), `iat`, `exp`
 - **Refresh:** Tokens within 5 minutes of expiry can be refreshed via `POST /auth/refresh`
-- **Logout:** `jti` is added to the in-memory `revoked_tokens` blocklist. Expired entries are purged periodically.
+- **Logout:** `jti` is added to an in-memory set **and** persisted in MySQL `revoked_tokens`; on startup `loadRevokedTokensFromDb()` repopulates the in-memory set so revocations survive process restarts.
 
 ### 4.2 Anti-Replay Protection
 
@@ -284,10 +299,14 @@ When `GET /incidents/:id` returns a response, encrypted fields in `risk_tags.sen
 
 ### 4.6 Rate Limiting
 
-| Endpoint | Limit | Window | On breach |
-|----------|-------|--------|-----------|
-| `POST /auth/login` | 60 requests | 1 minute | 429 Too Many Requests |
-| Login failures | 10 failures | 5 minutes | Account locked for 5 minutes |
+| Layer | Limit | Window | On breach |
+|-------|-------|--------|-----------|
+| `POST /auth/login` (per username, in controller) | 60 requests | 1 minute | 429 Too Many Requests |
+| Login failures (per account) | 10 failures | 5 minutes | Account locked (HTTP 423) |
+| Pre-auth (`express-rate-limit` on `app`, production) | 120 requests | 1 minute | 429 (by IP) |
+| Post-auth (`/incidents`, `/search`, …, production) | 60 requests | 1 minute | 429 (keyed by JWT user id) |
+
+In `NODE_ENV=test`, global Express rate limiters are bypassed so Jest can run without throttling.
 
 ### 4.7 Content Moderation
 
@@ -311,15 +330,20 @@ Referrer-Policy: no-referrer
 
 Every non-public route uses `requireRole(...)` middleware. Roles are checked against the JWT `role` claim.
 
-| Route | Allowed Roles |
-|-------|-------------|
+| Route | Allowed roles / notes |
+|-------|------------------------|
 | `POST /incidents` | Reporter |
 | `PATCH /incidents/:id/status` | Dispatcher |
-| `GET /incidents`, `GET /incidents/:id` | All authenticated |
-| `GET /search/incidents` | All authenticated |
-| `GET /settings/config` | Safety Manager, Auditor, Administrator |
-| `PATCH /settings/*` | Safety Manager |
+| `GET /incidents`, `GET /incidents/:id` | Authenticated (scoped by role) |
+| `GET /search/incidents` | Authenticated (Reporter: own incidents) |
+| `GET /search/resources` | Authenticated |
+| `GET /settings/config` | Authenticated — **response filtered** (Reporter: types + sites; Dispatcher: + SLA defaults; privileged: full config including `severity_rules`) |
+| `PATCH /settings/sla`, `/incident-types`, `/sla-rules`, `/severity-rules` | Safety Manager |
+| `PATCH /settings/facility-sites` | Safety Manager, Administrator |
 | `GET /admin/metrics` | Safety Manager, Auditor, Administrator |
+| `GET /export/incidents`, `GET /export/metrics` | Safety Manager, Auditor, Administrator |
+| `POST /reports`, `DELETE /reports/:id` | Safety Manager, Administrator |
+| `GET /reports/:id/run` | Safety Manager, Auditor, Administrator |
 
 ---
 
@@ -401,7 +425,17 @@ Every non-public route uses `requireRole(...)` middleware. Roles are checked aga
 1. Decrypt `.enc` file with AES-256-GCM using `DATA_ENCRYPTION_KEY`
 2. Apply `.sql` to MySQL: `mysql -u app_user -p incident_db < backup.sql`
 
-### 5.5 Anomaly Detection
+### 5.5 Severity auto-escalation (background job)
+
+When `ENABLE_CRON` is not `false`, `startEscalationCronJobs()` schedules a job (default: every **5 minutes**) that:
+
+1. Loads `severity_rules` from `settings` where `auto_escalate` is true and `escalate_after_hours` is set.  
+2. Selects open incidents (`New`, `Acknowledged`, `In Progress`) whose `type` matches a rule and whose **calendar** age exceeds `escalate_after_hours`.  
+3. Transitions eligible rows to `Escalated` inside a transaction and writes `incident_actions` attributed to `ESCALATION_SYSTEM_USER_ID` (default user id `1` — must exist in `users`).
+
+**Note:** Dispatcher-facing SLA colors in `Triage.vue` use **business-time** helpers; escalation timing is **wall-clock hours** from `created_at`. Operators should treat them as related but not identical signals unless future work aligns the two.
+
+### 5.6 Anomaly Detection
 
 Runs every 10 minutes via node-cron. Three detectors:
 
@@ -437,5 +471,6 @@ Runs every 10 minutes via node-cron. Three detectors:
 | `PORT` | Backend listen port | Default: 3000 |
 | `UPLOAD_DIR` | File upload directory | Default: ./uploads |
 | `REQUIRE_HTTPS` | Enforce HTTPS in production | Default: false |
-| `ENABLE_CRON` | Run backup/alert cron jobs | Default: false (true in prod) |
+| `ENABLE_CRON` | Run backup, anomaly, and severity escalation crons | Default false in sample `.env`; Docker stack enables for demos |
+| `ESCALATION_SYSTEM_USER_ID` | `user_id` on auto-escalation `incident_actions` | Default `1` (seed admin) |
 | `NODE_ENV` | Environment | development / test / production |

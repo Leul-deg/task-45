@@ -4,7 +4,7 @@ Incident Status Transitions — Which Transitions Are Valid?
 
 Question: The platform enforces a strict state machine on incident statuses. Which transitions are valid, and what happens if an invalid transition is attempted?
 
-My Understanding: The `validTransitions` map in `src/controllers/incidents.ts` defines the allowed transitions. Every `PATCH /incidents/:id/status` call queries the current status first, then validates the proposed transition before executing the update.
+My Understanding: The `validTransitions` map in `repo/backend/src/controllers/incidents.ts` defines the allowed transitions. Every `PATCH /incidents/:id/status` call queries the current status first, then validates the proposed transition before executing the update.
 
 Solution: The valid state machine:
 
@@ -44,35 +44,28 @@ What Happens When SLA Targets Are Breached?
 
 Question: The system tracks acknowledgement SLA (15 minutes by default) and closure SLA (72 hours). What happens when these targets are exceeded?
 
-My Understanding: SLAs are not enforced at the database level — they are informational, displayed in the `Triage.vue` dispatcher dashboard as color-coded pills. The backend does not automatically escalate or change incident status when an SLA is breached.
+My Understanding: **Acknowledgement / closure SLAs** are not enforced as hard database constraints. Dispatchers see SLA risk in the UI. Separately, **severity rules** can drive **automatic status escalation** to `Escalated` on a time basis.
 
-Solution: **Frontend SLA display (Triage.vue):**
+Solution: **Frontend SLA display (`repo/frontend/src/views/Triage.vue`):**
 
-The `ackAlertClass()` and `closeAlertClass()` functions compute elapsed time and assign CSS classes:
+The triage view uses **business-day/time helpers** (`elapsedMinutes` / `elapsedHours` against configured targets) to color SLA pills for acknowledgement and closure risk.
 
-| Condition | Class | Meaning |
-|-----------|-------|---------|
-| `elapsed >= SLA - 5min` | `warn` | Warning — approaching breach |
-| `elapsed >= SLA` | `danger` | SLA breached |
-| `status === Closed` | `ok` | No SLA applicable |
+| Condition (simplified) | Typical meaning |
+|------------------------|-----------------|
+| Approaching breach window | Warning styling |
+| At or past SLA target | Danger styling |
+| `Closed` | No active SLA styling |
 
-```typescript
-function ackAlertClass(incident: IncidentRecord): string {
-  if (incident.status !== "New") return "ok";
-  const elapsed = elapsedMinutes(incident.created_at);
-  if (elapsed >= ACK_TARGET_MINUTES) return "danger";
-  if (elapsed >= ACK_TARGET_MINUTES - 5) return "warn";
-  return "ok";
-}
-```
+**Admin dashboard SLA summary (`GET /admin/metrics` → `sla_at_risk`):**  
+`repo/backend/src/controllers/admin.ts` recomputes open-incident counts at risk using the same **business-time** utilities (`repo/backend/src/utils/businessHours.ts`) and current `sla_defaults` from `settings`.
 
-**Anomaly detection (backend cron, every 10 minutes):**
-The `detectIncidentEditSpike()` function in `src/cron/alerts.ts` alerts when incident status update frequency exceeds `max(12, baseline × 3)` edits in 15 minutes — this can catch unusual volumes of triage activity that may indicate SLA pressure or an ongoing incident surge.
+**Severity auto-escalation (backend cron):**  
+`repo/backend/src/cron/escalation.ts` runs on a schedule (every **5 minutes** when cron is enabled). It reads `severity_rules` from `settings`; for each rule with `auto_escalate: true` and `escalate_after_hours`, incidents in `New` / `Acknowledged` / `In Progress` whose **calendar** age from `created_at` exceeds the threshold are moved to **`Escalated`**, with `incident_actions` attributed to `ESCALATION_SYSTEM_USER_ID` (env, default `1`). This is **not** the same clock as the triage pills unless product explicitly aligns them.
 
-**Settings-driven SLA:**
-The SLA targets themselves (`ack_minutes`, `close_hours`) are configurable via `PATCH /settings/sla` by Safety Managers. The frontend reads these from `GET /settings/config` and uses them in all timer calculations, so dashboard behavior adapts automatically when SLAs change.
+**Anomaly detection (backend cron, every 10 minutes):**  
+`detectIncidentEditSpike()` in `repo/backend/src/cron/alerts.ts` still flags unusual volumes of `PATCH …/status` traffic (`max(12, baseline × 3)` in a 15-minute window).
 
-**Note:** The current implementation is informational only. A future enhancement could add automatic status escalation or email notifications when SLAs are breached.
+**Settings:** `PATCH /settings/sla` updates acknowledgement/closure targets. `PATCH /settings/severity-rules` updates auto-escalation behaviour.
 
 ---
 
@@ -80,7 +73,7 @@ How Are File Uploads Validated — Extension vs. Content Signature?
 
 Question: A malicious user might try to bypass file type restrictions by renaming a malicious executable (e.g., `malware.exe` → `malware.jpg`) or by setting a fake MIME type. How does the platform prevent this?
 
-My Understanding: The upload validation in `src/services/upload.ts` applies **three independent checks** that must all pass:
+My Understanding: The upload validation in `repo/backend/src/services/upload.ts` applies **three independent checks** that must all pass:
 
 Solution: **Layer 1: Extension check**
 ```typescript
@@ -209,11 +202,11 @@ SELECT id, username, login_attempts, locked_until FROM users
 WHERE login_attempts >= 10 OR (locked_until IS NOT NULL AND locked_until > NOW())
 ```
 
-**Trigger:** Any user with ≥10 failed login attempts in the last 5 minutes, or any user currently in lockout state.
+**Trigger:** Any user row with `login_attempts >= 10` **or** `locked_until` in the future (see `repo/backend/src/cron/alerts.ts`).
 
-**Rationale:** While the rate limiter already returns 429 and the lockout mechanism prevents brute force at the login endpoint, the cron detector provides visibility into accounts under active attack. An alert is written even for accounts that are already locked, to flag persistent attackers and detect credential stuffing across multiple accounts.
+**Rationale:** While the login endpoint rate-limits and locks accounts, the cron detector surfaces accounts in a bad state for operators and log aggregation.
 
-**Note:** The in-memory rate store tracks per-username attempts at the application layer. This SQL query catches accounts that may have been targeted before the rate limiter was warmed up.
+**Note:** Login throttling also uses in-memory structures in `repo/backend/src/controllers/auth.ts`; the SQL-based alert is a coarse dashboard signal, not a precise “last 5 minutes” window.
 
 **Alert payload:** `{user_id, username, login_attempts: N, locked_until: timestamp|null}`
 
@@ -254,7 +247,7 @@ My Understanding: The system implements two independent rate-limiting mechanisms
 
 Solution: **Login rate limiter (application-level, in-memory)**
 
-Location: `src/controllers/auth.ts`
+Location: `repo/backend/src/controllers/auth.ts`
 
 ```typescript
 const LOGIN_WINDOW_MS = 60 * 1000;   // 1 minute
@@ -295,9 +288,9 @@ await dbPool.execute(
 - **Recovery:** `locked_until` is checked on each login; once the timestamp passes, the user can log in again
 - **Difference from rate limiter:** The lockout survives server restarts because it is stored in MySQL, not in-memory
 
-**General API endpoints (future extension)**
+**Authenticated API traffic (`express-rate-limit`)**
 
-Currently, only the login endpoint has explicit rate limiting. The `rate limiter` middleware pattern could be extended to other routes using the same in-memory sliding window approach, but it is not currently active for incident or search endpoints.
+`repo/backend/src/app.ts` mounts `preAuthRateLimiter` before `/auth` and `postAuthRateLimiter` on protected routers (`/incidents`, `/settings`, `/search`, `/export`, `/reports`, `/admin`). In production, post-auth limits default to **60 requests / minute / JWT user id**; pre-auth allows a higher burst for anonymous health checks and login. Both are **no-ops when `NODE_ENV=test`** so automated tests are not throttled.
 
 ---
 
@@ -352,20 +345,29 @@ Solution: **Application-level immutability:**
 
 1. **No UPDATE or DELETE routes exist for audit logs.** The `audit_logs` table has no corresponding controller in `src/controllers/`. There is no `PATCH /audit-logs/:id` or `DELETE /audit-logs/:id` endpoint.
 
-2. **Insert-only pattern in the audit middleware:**
+2. **Insert-only pattern in the audit middleware (`repo/backend/src/middleware/audit.ts`):**
    ```typescript
-   // src/middleware/audit.ts
    res.on("finish", () => {
-     if (res.statusCode >= 500) return;
-     void dbPool
-       .execute(
-         "INSERT INTO audit_logs (route, user_id, before_val, after_val, created_at) VALUES (?, ?, ?, ?, ?)",
-         [route, userId, JSON.stringify(beforeVal), JSON.stringify(afterVal), startedAt],
-       )
-       .catch((error) => { console.error(`audit-log-failure: ${error.message}`); });
+     const afterVal =
+       res.statusCode >= 500
+         ? {
+             action: res.locals.auditAction ?? req.method,
+             status_code: res.statusCode,
+             outcome: "server_error",
+             request_body: sanitizeBody(req.body, route),
+           }
+         : (res.locals.auditAfter ?? {
+             action: res.locals.auditAction ?? req.method,
+             request_body: sanitizeBody(req.body, route),
+             status_code: res.statusCode,
+           });
+     void dbPool.execute(
+       "INSERT INTO audit_logs (route, user_id, before_val, after_val, created_at) VALUES (?, ?, ?, ?, ?)",
+       [route, userId, JSON.stringify(beforeVal), JSON.stringify(afterVal), startedAt],
+     );
    });
    ```
-   Only `INSERT` is ever issued against `audit_logs`. The `auditLogger` middleware captures every state-changing request (`POST`, `PUT`, `PATCH`, `DELETE`) automatically — controllers do not need to call it explicitly.
+   Only `INSERT` is used. **HTTP ≥ 500** responses still produce a row: `after_val` records `outcome: "server_error"` plus a **sanitized** snapshot of the request body so operators can correlate failures without skipping the audit trail entirely.
 
 3. **Audit data captured per request:**
    | Field | Source |
