@@ -144,6 +144,8 @@ repo/
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Implementation note (`repo/backend/src/app.ts`):** `auditLogger` and `preAuthRateLimiter` run on **all** requests (including `/auth/*` and `GET /health`) **before** routers mount. **`authenticateJwt`** and **`postAuthRateLimiter`** apply only to `/admin`, `/incidents`, `/settings`, `/search`, `/export`, and `/reports`. CSRF / nonce / timestamp enforcement lives in `secureStateChangingRoute` on individual mutating handlers, not on every GET.
+
 ---
 
 ## 3. Data Model
@@ -162,11 +164,11 @@ repo/
 | `updated_at` | TIMESTAMP | Auto-update |
 
 **Roles:**
-- **Reporter** — Can file incidents
-- **Dispatcher** — Can triage and update incident status
-- **Safety Manager** — Can triage, update status, manage settings
-- **Auditor** — Read-only access to incidents, search, metrics
-- **Administrator** — Full access including settings, metrics
+- **Reporter** — Can file incidents (`POST /incidents`)
+- **Dispatcher** — Can update incident status (`PATCH /incidents/:id/status`) and use triage/search APIs
+- **Safety Manager** — Manages settings (SLA, types, rules, severity, sites where allowed), views metrics/reports/exports; **does not** receive `PATCH /incidents/:id/status` in the current API (that route is Dispatcher-only)
+- **Auditor** — Read-oriented access to incidents, search, metrics, report list/run, exports
+- **Administrator** — Broad access including `PATCH /settings/facility-sites`, reports create/delete, metrics/exports; still **not** authorized for `PATCH /incidents/:id/status` (Dispatcher-only)
 
 ### 3.2 `incidents`
 
@@ -342,6 +344,7 @@ Every non-public route uses `requireRole(...)` middleware. Roles are checked aga
 | `PATCH /settings/facility-sites` | Safety Manager, Administrator |
 | `GET /admin/metrics` | Safety Manager, Auditor, Administrator |
 | `GET /export/incidents`, `GET /export/metrics` | Safety Manager, Auditor, Administrator |
+| `GET /reports` | Safety Manager, Auditor, Administrator |
 | `POST /reports`, `DELETE /reports/:id` | Safety Manager, Administrator |
 | `GET /reports/:id/run` | Safety Manager, Auditor, Administrator |
 

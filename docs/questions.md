@@ -6,17 +6,16 @@ Question: The platform enforces a strict state machine on incident statuses. Whi
 
 My Understanding: The `validTransitions` map in `repo/backend/src/controllers/incidents.ts` defines the allowed transitions. Every `PATCH /incidents/:id/status` call queries the current status first, then validates the proposed transition before executing the update.
 
-Solution: The valid state machine:
+Solution: The valid state machine for **`PATCH /incidents/:id/status`** (Dispatcher) is:
 
 ```
-┌─────────┐     ┌───────────────┐     ┌─────────────┐     ┌───────────┐     ┌────────┐
-│   New   │────▶│ Acknowledged   │────▶│ In Progress  │────▶│ Escalated │────▶│ Closed │
-└─────────┘     └───────────────┘     └─────────────┘     └───────────┘     └────────┘
-     │                  │                    │                    │
-     │                  │                    │                    │
-     └──────────────────┴────────────────────┴────────────────────┘
-                    (Escalated from any state)
+New ──► Acknowledged ──► In Progress ──► Escalated ──► Closed
+  │            │              │             ▲
+  └────────────┴──────────────┴─────────────┘
+        (each of New / Acknowledged / In Progress may go directly to Escalated)
 ```
+
+Separately, the **severity auto-escalation cron** (`repo/backend/src/cron/escalation.ts`) can move `New` / `Acknowledged` / `In Progress` incidents to **`Escalated`** when `severity_rules` match — that is not a dispatcher transition.
 
 **Valid transitions:**
 | From | Allowed to |
@@ -35,8 +34,8 @@ Solution: The valid state machine:
 
 **Why this design:**
 - Prevents dispatchers from accidentally closing incidents still under investigation
-- `Escalated` is reachable from any open state, ensuring emergencies can be flagged regardless of current position in the workflow
-- `Closed` is irreversible — no code path allows any outgoing transition, and no RBAC role can bypass this because the DB enforces it
+- `Escalated` is reachable from **`New`**, **`Acknowledged`**, or **`In Progress`** via the dispatcher API (not from **`Closed`**). The escalation cron can also set **`Escalated`** for eligible open rows per `severity_rules`.
+- `Closed` is irreversible — no outgoing transitions in `validTransitions`, and no role is granted a separate bypass in code reviewed here
 
 ---
 

@@ -48,6 +48,7 @@ x-request-nonce: <uuid>             # Must be unique per request; reuse returns 
 | `PATCH /settings/facility-sites` | JWT | Safety Manager, Administrator | CSRF + timestamp + nonce |
 | `GET /admin/metrics` | JWT | Safety Manager, Auditor, Administrator | — |
 | `GET /export/incidents`, `GET /export/metrics` | JWT | Safety Manager, Auditor, Administrator | — |
+| `GET /reports` | JWT | Safety Manager, Auditor, Administrator | — |
 | `POST /reports`, `DELETE /reports/:id` | JWT | Safety Manager, Administrator | CSRF + timestamp + nonce |
 | `GET /reports/:id/run` | JWT | Safety Manager, Auditor, Administrator | — |
 | **Other authenticated routes** | JWT | Per-route `requireRole` | CSRF + timestamp + nonce on `POST`/`PUT`/`PATCH`/`DELETE` |
@@ -671,11 +672,21 @@ Download aggregated metrics as CSV (incidents by status, moderation action count
 
 ---
 
+### `GET /reports`
+
+List saved report definitions (most recently updated first, max 100).
+
+**Auth:** JWT + Safety Manager, Auditor, or Administrator  
+
+**Success (200):** `{ "reports": [ { "id", "name", "description", "created_by", "config", "created_at", "updated_at" } ] }`
+
+---
+
 ### `POST /reports` / `GET /reports/:id/run` / `DELETE /reports/:id`
 
 Saved report definitions and execution. See `repo/backend/src/controllers/reports.ts` for `config` validation (`group_by`, optional filters, `include_fields`).
 
-**Auth:** Create/delete — Safety Manager or Administrator (state-changing = security headers). Run — Safety Manager, Auditor, or Administrator.
+**Auth:** `POST` / `DELETE` — Safety Manager or Administrator (state-changing = security headers). `GET …/run` — Safety Manager, Auditor, or Administrator.
 
 ---
 
