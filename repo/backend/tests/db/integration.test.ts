@@ -436,7 +436,7 @@ maybeDescribe("Real-DB: CSV export", () => {
 
     const lines = res.text.split("\n").filter((l) => l.trim() !== "");
     expect(lines[0]).toBe(
-      "ID,Reporter ID,Type,Description,Site,Time,Status,Rating,Cost,Created At,Updated At",
+      "ID,Reporter ID,Type,Description (truncated),Site,Time,Status,Rating,Cost,Created At,Updated At",
     );
     expect(lines.length).toBeGreaterThan(1);
   });

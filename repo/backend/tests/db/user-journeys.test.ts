@@ -392,7 +392,7 @@ maybeDescribe("User journey: Admin", () => {
 
     const headerLine = res.text.split("\n")[0];
     expect(headerLine).toBe(
-      "ID,Reporter ID,Type,Description,Site,Time,Status,Rating,Cost,Created At,Updated At",
+      "ID,Reporter ID,Type,Description (truncated),Site,Time,Status,Rating,Cost,Created At,Updated At",
     );
   });
 
