@@ -172,3 +172,138 @@ describe("PATCH /settings/severity-rules", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("PATCH /settings/sla-rules", () => {
+  test("Safety Manager can set valid SLA rules and receive them back", async () => {
+    const res = await request(app)
+      .patch("/settings/sla-rules")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({
+        rules: [
+          { incident_type: "Fire", max_ack_minutes: 5, max_close_hours: 24 },
+          { incident_type: "Injury", max_ack_minutes: 10, max_close_hours: 48 },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.rules)).toBe(true);
+    expect(res.body.rules).toHaveLength(2);
+  });
+
+  test("accepts an empty rules array (no minimum required)", async () => {
+    const res = await request(app)
+      .patch("/settings/sla-rules")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ rules: [] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.rules).toEqual([]);
+  });
+
+  test("rejects when rules exceeds 100 entries", async () => {
+    const rules = Array.from({ length: 101 }, (_, i) => ({ incident_type: `Type${i}` }));
+    const res = await request(app)
+      .patch("/settings/sla-rules")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ rules });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/maximum/i);
+  });
+
+  test("Reporter role returns 403", async () => {
+    const res = await request(app)
+      .patch("/settings/sla-rules")
+      .set("Authorization", `Bearer ${REPORTER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ rules: [] });
+
+    expect(res.status).toBe(403);
+  });
+
+  test("requires security headers", async () => {
+    const res = await request(app)
+      .patch("/settings/sla-rules")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .send({ rules: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/timestamp|nonce|csrf/i);
+  });
+});
+
+describe("PATCH /settings/facility-sites", () => {
+  test("Safety Manager can update facility sites", async () => {
+    const res = await request(app)
+      .patch("/settings/facility-sites")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ sites: ["Main Campus", "Warehouse A", "Warehouse B", "Dock Area"] });
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.sites)).toBe(true);
+    expect(res.body.sites).toHaveLength(4);
+    expect(res.body.sites).toContain("Main Campus");
+  });
+
+  test("Administrator can update facility sites", async () => {
+    const res = await request(app)
+      .patch("/settings/facility-sites")
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ sites: ["Site X"] });
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.sites)).toBe(true);
+  });
+
+  test("empty sites array returns 400", async () => {
+    const res = await request(app)
+      .patch("/settings/facility-sites")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ sites: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("at least one");
+  });
+
+  test("Reporter role returns 403", async () => {
+    const res = await request(app)
+      .patch("/settings/facility-sites")
+      .set("Authorization", `Bearer ${REPORTER_TOKEN}`)
+      .set("x-csrf-token", "abcd1234efgh5678ijkl9012mnop3456")
+      .set("x-request-timestamp", Date.now().toString())
+      .set("x-request-nonce", crypto.randomUUID())
+      .send({ sites: ["Site X"] });
+
+    expect(res.status).toBe(403);
+  });
+
+  test("requires security headers", async () => {
+    const res = await request(app)
+      .patch("/settings/facility-sites")
+      .set("Authorization", `Bearer ${MANAGER_TOKEN}`)
+      .send({ sites: ["Site X"] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/timestamp|nonce|csrf/i);
+  });
+});

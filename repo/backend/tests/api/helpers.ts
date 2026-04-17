@@ -17,7 +17,7 @@ export function makeTestToken(
       username,
       role,
       csrfToken: TEST_CSRF,
-      jti: TEST_JTI,
+      jti: crypto.randomUUID(),
     },
     TEST_SECRET,
     { expiresIn } as jwt.SignOptions,

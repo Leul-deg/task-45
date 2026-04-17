@@ -1,60 +1,55 @@
 #!/usr/bin/env bash
+# Runs the full SentinelSafe EHS test suite inside Docker containers.
+# Requires: docker, docker compose v2.
+# No local Node or Python install is needed — all test execution happens in containers.
 set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE="docker compose -f ${SCRIPT_DIR}/docker-compose.test.yml"
+
+echo "============================================"
+echo " SentinelSafe EHS — Full Test Suite (Docker)"
+echo "============================================"
+echo ""
+
 PASS=0
 FAIL=0
 TOTAL=0
 
-echo "============================================"
-echo " SentinelSafe EHS — Full Test Suite"
-echo "============================================"
-echo ""
-
-# --- Install backend dependencies if needed ---
-cd "$SCRIPT_DIR/backend"
-if [ ! -d "node_modules" ]; then
-  echo "Installing backend dependencies..."
-  npm install --no-audit --no-fund 2>&1
+cleanup() {
   echo ""
-fi
+  echo "--- Tearing down test containers ---"
+  ${COMPOSE} down --volumes --remove-orphans 2>/dev/null || true
+}
+trap cleanup EXIT
 
-# --- Install frontend dependencies if needed ---
-cd "$SCRIPT_DIR/frontend"
-if [ ! -d "node_modules" ]; then
-  echo "Installing frontend dependencies..."
-  npm install --no-audit --no-fund 2>&1
-  echo ""
-fi
-
-# --- Backend Unit Tests ---
-echo "--- Backend Unit Tests ---"
-cd "$SCRIPT_DIR/backend"
-if npx jest --testPathPatterns='tests/unit/' --forceExit --no-cache 2>&1; then
-  echo "[PASS] Backend unit tests"
+# --- Backend unit + API/integration tests (mocked DB — no MySQL needed) ---
+echo "--- Backend Unit & API Tests ---"
+if ${COMPOSE} run --rm backend-test; then
+  echo "[PASS] Backend unit + API tests"
   PASS=$((PASS + 1))
 else
-  echo "[FAIL] Backend unit tests"
+  echo "[FAIL] Backend unit + API tests"
   FAIL=$((FAIL + 1))
 fi
 TOTAL=$((TOTAL + 1))
 echo ""
 
-# --- Backend API / Integration Tests ---
-echo "--- Backend API Tests ---"
-if npx jest --testPathPatterns='tests/(api|integration)/' --forceExit --no-cache 2>&1; then
-  echo "[PASS] Backend API tests"
+# --- Backend real-DB integration tests (requires MySQL — started automatically via depends_on) ---
+echo "--- Backend Real-DB Integration Tests ---"
+if ${COMPOSE} run --rm backend-realdb-test; then
+  echo "[PASS] Backend real-DB integration tests"
   PASS=$((PASS + 1))
 else
-  echo "[FAIL] Backend API tests"
+  echo "[FAIL] Backend real-DB integration tests"
   FAIL=$((FAIL + 1))
 fi
 TOTAL=$((TOTAL + 1))
 echo ""
 
-# --- Frontend Tests ---
+# --- Frontend tests ---
 echo "--- Frontend Tests ---"
-cd "$SCRIPT_DIR/frontend"
-if npx vitest run 2>&1; then
+if ${COMPOSE} run --rm frontend-test; then
   echo "[PASS] Frontend tests"
   PASS=$((PASS + 1))
 else
@@ -64,11 +59,10 @@ fi
 TOTAL=$((TOTAL + 1))
 echo ""
 
-# --- Summary ---
 echo "============================================"
-echo " Test Summary: $PASS passed, $FAIL failed, $TOTAL total"
+echo " Test Summary: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 echo "============================================"
-if [ "$FAIL" -gt 0 ]; then
+if [ "${FAIL}" -gt 0 ]; then
   exit 1
 fi
 exit 0

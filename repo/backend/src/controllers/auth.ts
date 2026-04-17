@@ -66,6 +66,12 @@ function clearFailures(key: string): void {
   failureStore.delete(key);
 }
 
+// Test-only helper to reset in-memory rate-limit/failure state between tests.
+export function __resetAuthRateState(): void {
+  loginRateStore.clear();
+  failureStore.clear();
+}
+
 function createClaims(user: UserRow): AuthClaims {
   return {
     sub: user.id,

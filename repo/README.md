@@ -69,49 +69,70 @@ Services will be available at:
 - **Backend:** http://localhost:3000
 - **MySQL:** localhost:3306
 
-### 3. Log In
+### 3. Verify the System is Running
+
+After `docker compose up --build` completes, confirm the backend is healthy:
+
+```bash
+curl http://localhost:3000/health
+# Expected: {"status":"ok"}
+```
+
+Confirm the frontend is reachable:
+
+```bash
+curl -I http://localhost
+# Expected: HTTP/1.1 200 OK
+```
+
+Then log in via the API to confirm full stack connectivity:
+
+```bash
+curl -s -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' | grep access_token
+# Expected: "access_token":"<jwt>"
+```
+
+Or open http://localhost in a browser and sign in with any of the [Default Users](#default-users).
+
+### 4. Log In
 
 Users are seeded automatically by `backend/src/db/seed.sql` on first start. See [Default Users](#default-users) for credentials.
 
-### 4. Local Development
-
-Without Docker:
-
-```bash
-# Backend
-cd backend
-npm install
-cp .env.example .env   # edit .env
-npm run dev
-
-# Frontend
-cd frontend
-npm install
-npm run dev
-```
-
 ## Testing
 
-### Backend (unit, integration, and API tests)
+All tests run inside Docker — no local Node.js installation required.
 
-```bash
-cd backend
-npm install
-npm test
-```
-
-Or use the root runner (runs backend unit tests + API/integration tests):
+### Full Suite (Backend + Frontend)
 
 ```bash
 ./run_tests.sh
 ```
 
-### Frontend (Vitest)
+This script:
+1. Spins up an isolated MySQL 8 test container
+2. Runs backend unit, API, and integration tests (mocked DB)
+3. Runs backend real-DB integration tests against the live test container
+4. Runs frontend Vitest tests
+5. Tears down all test containers and volumes on exit
+
+### Backend Only (Docker)
 
 ```bash
-cd frontend
-npm install
-npm test
+docker compose -f docker-compose.test.yml run --rm backend-test
+```
+
+### Real-DB Integration Tests Only (Docker)
+
+```bash
+docker compose -f docker-compose.test.yml run --rm backend-realdb-test
+```
+
+### Frontend Only (Docker)
+
+```bash
+docker compose -f docker-compose.test.yml run --rm frontend-test
 ```
 
 ## Security Model

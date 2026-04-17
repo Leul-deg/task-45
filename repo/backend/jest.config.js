@@ -7,4 +7,15 @@ module.exports = {
   transform: {
     "^.+\\.ts$": ["ts-jest", { tsconfig: "tsconfig.jest.json" }],
   },
+  collectCoverageFrom: [
+    "src/**/*.ts",
+    "!src/index.ts",
+  ],
+  coverageThreshold: {
+    global: {
+      lines: 60,
+      functions: 60,
+      branches: 50,
+    },
+  },
 };
